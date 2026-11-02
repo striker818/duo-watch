@@ -53,7 +53,7 @@ def check():
                 hits.append((label, url, f'{label} @ {s.get("storeName")} ({s.get("city")}, {dist:.0f} mi) - {p.get("pickupSearchQuote", "")}'))
     return hits, len(stores)
 
-def notify(hits):
+def notify(hits, add_to_bag=True):
     urls = list(dict.fromkeys(u for _, u, _ in hits))
     BUY_URL = urls[0]
     body = ("iPhone Duo IN STOCK for pickup:\n" + "\n".join(t for *_, t in hits)
@@ -81,6 +81,37 @@ def notify(hits):
                 s.login(GMAIL_USER, GMAIL_APP_PW); s.send_message(m)
         except Exception as e:
             log(f"email failed: {e}")
+    if MAC:  # last, since it waits on the page; pre-fill one tab only (256GB first) so the bag gets one phone
+        prefill(next(u for _, u in PARTS.values() if u in urls), add_to_bag)
+
+PREFILL_AS = '''on run argv
+  set u to item 1 of argv
+  tell application "Google Chrome"
+    repeat 60 times
+      repeat with w in windows
+        repeat with t in tabs of w
+          if URL of t starts with u and not (loading of t) then
+            execute t javascript (item 2 of argv)
+            repeat 40 times
+              delay 1
+              set s to execute t javascript "window.__duoPrefill || ''"
+              if s starts with "ready" or s starts with "adding" or s starts with "stopped" then return s
+            end repeat
+            return "no result: " & s
+          end if
+        end repeat
+      end repeat
+      delay 0.5
+    end repeat
+  end tell
+  return "tab never finished loading"
+end run'''
+
+def prefill(url, add_to_bag=True):
+    """Pick Finance > Apple Card Monthly Installments, T-Mobile, No AppleCare (and Add to Bag) in the open Chrome tab."""
+    js = ("" if add_to_bag else "window.__duoNoBag = true;\n") + Path(__file__).with_name("prefill.js").read_text()
+    r = subprocess.run(["osascript", "-e", PREFILL_AS, url, js], capture_output=True, text=True, timeout=120)
+    log(f"prefill: {(r.stdout or r.stderr).strip()}")
 
 def main():
     try:
@@ -96,5 +127,7 @@ def main():
 
 if __name__ == "__main__":
     if "--test-alert" in sys.argv:
-        lbl, url = PARTS["MK1G4LL/A"]; notify([(lbl, url, f"TEST - {lbl} @ Rosedale (Roseville, 5 mi)")]); sys.exit()
+        lbl, url = PARTS["MK1G4LL/A"]; notify([(lbl, url, f"TEST - {lbl} @ Rosedale (Roseville, 5 mi)")], add_to_bag=False); sys.exit()
+    if "--test-prefill" in sys.argv:  # opens the 256GB page and pre-fills it, stopping before Add to Bag
+        url = PARTS["MK1E4LL/A"][1]; subprocess.run(["open", "-a", "Google Chrome", url]); prefill(url, add_to_bag=False); sys.exit()
     main()
