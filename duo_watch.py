@@ -30,6 +30,9 @@ STATE = Path(os.environ.get("DUO_STATE", Path.home() / ".duo_watch_state.json"))
 LOG = Path(os.environ.get("DUO_LOG", Path.home() / "duo_watch.log"))
 HISTORY = Path(os.environ.get("DUO_HISTORY", Path.home() / "duo_stock_history.csv"))  # one row per stock window
 OPEN = Path(os.environ.get("DUO_OPEN", Path.home() / ".duo_stock_open.json"))        # windows still in stock
+BLOCKED = STATE.with_name(STATE.name + ".blocked")   # touched when Apple rate-limits us (HTTP 541)
+BACKOFF = 600   # seconds to pause after a block; a test block (polling every 3s) lasted 25+ min and checking
+                # during it may extend it
 MAC = sys.platform == "darwin"                           # False on the GitHub Actions runner
 
 # /shop/fulfillment-messages started returning HTTP 541 for all parts (Nov 2026); this one still works
@@ -169,9 +172,13 @@ def history():
     print("(times are within about 90 seconds, the polling interval)")
 
 def main():
+    if BLOCKED.exists() and time.time() - BLOCKED.stat().st_mtime < BACKOFF:
+        return
     try:
         hits, n = check()
     except Exception as e:
+        if getattr(e, "code", None) == 541:
+            BLOCKED.touch(); log(f"blocked by Apple (HTTP 541) - pausing checks for {BACKOFF // 60} min"); return
         log(f"check error: {e}"); return
     prev = json.loads(STATE.read_text()) if STATE.exists() else []
     if hits and [h[2] for h in hits] != prev:
