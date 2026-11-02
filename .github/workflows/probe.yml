@@ -1,0 +1,42 @@
+name: rate-probe
+# One-off test: how fast can we poll Apple's pickup endpoint before getting blocked?
+# Steps down the interval, stops at the first non-200/non-JSON reply, then times how long the block lasts.
+# Runs on GitHub so a block never hits the Mac's IP.
+on: {workflow_dispatch: {}}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env: {DUO_ZIP: "${{ secrets.DUO_ZIP }}"}
+    steps:
+      - run: |
+          python3 -u - <<'PY'
+          import json, os, time, urllib.request
+          URL = ("https://www.apple.com/shop/retail/pickup-message?parts.0=MK1E4LL/A&parts.1=MK1G4LL/A&location="
+                 + os.environ["DUO_ZIP"])
+          H = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+               "Accept": "application/json"}
+          def hit():
+              t = time.time()
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(URL, headers=H), timeout=20) as r:
+                      ok = r.status == 200 and len(json.load(r)["body"]["stores"]) > 0
+                      return ok, r.status, time.time() - t
+              except Exception as e:
+                  return False, getattr(e, "code", str(e)[:60]), time.time() - t
+          n = 0
+          for interval, count in [(15, 8), (10, 12), (5, 24), (3, 40), (2, 60), (1, 120), (0.5, 120)]:
+              for i in range(count):
+                  ok, code, dt = hit(); n += 1
+                  if not ok:
+                      print(f"BLOCKED at {interval}s interval, request {i+1}/{count} (total {n}): {code}")
+                      start = time.time()
+                      while time.time() - start < 1500:
+                          time.sleep(60); ok, code, _ = hit()
+                          print(f"  +{(time.time()-start)/60:.0f} min: {'OK again' if ok else code}")
+                          if ok: break
+                      raise SystemExit(0)
+                  time.sleep(max(0, interval - dt))
+              print(f"OK: {count} requests at {interval}s interval (avg reply {dt:.2f}s)")
+          print(f"never blocked ({n} requests)")
+          PY
