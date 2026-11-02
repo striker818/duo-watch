@@ -53,13 +53,14 @@ def check():
         for part, (label, url) in PARTS.items():
             p = s.get("partsAvailability", {}).get(part, {})
             if p.get("pickupDisplay") == "available" and s.get("state") == US_STATE:
-                hits.append((label, url, f'{label} @ {s.get("storeName")} ({s.get("city")}, {dist:.0f} mi) - {p.get("pickupSearchQuote", "")}'))
+                hits.append((label, url, f'{label} @ {s.get("storeName")} ({s.get("city")}, {dist:.0f} mi) - {p.get("pickupSearchQuote", "")}',
+                             s.get("storeNumber", "")))
     return hits, len(stores)
 
 def notify(hits, add_to_bag=True):
-    urls = list(dict.fromkeys(u for _, u, _ in hits))
+    urls = list(dict.fromkeys(u for _, u, *_ in hits))
     BUY_URL = urls[0]
-    body = ("iPhone Duo IN STOCK for pickup:\n" + "\n".join(t for *_, t in hits)
+    body = ("iPhone Duo IN STOCK for pickup:\n" + "\n".join(h[2] for h in hits)
             + "\n\nCheckout: pick T-Mobile, NO AppleCare, Apple Card Monthly Installments, then Pickup.\n"
             + "Buy now:\n" + "\n".join(urls))
     if MAC:
@@ -71,17 +72,22 @@ def notify(hits, add_to_bag=True):
     if NTFY_TOPIC:
         # phone push: title says size + store; links use x-safari-https:// (iOS 17+) so they open in Safari,
         # which keeps the Apple Card + T-Mobile presets (the Apple Store app ignores them)
-        # plus one button per in-stock size
+        # plus one button per in-stock size. #duo=<store> starts the Safari userscript (duo-prefill.user.js), which
+        # picks No AppleCare, adds to bag, selects that store and goes on to Apple's sign-in page
+        store = {}
+        for _, u, _, st in hits:
+            store.setdefault(u, st)
+        link = lambda u: f"x-safari-{u}#duo={store[u]}"
         first = hits[0][2].split(" (")[0].replace(" Star White T-Mobile", "")       # "512GB @ Mall of America"
-        phone_body = ("\n".join(t.split(" - ")[0] for *_, t in hits)
-                      + "\nOpens with Apple Card Monthly + T-Mobile set. Tap No AppleCare, Add to Bag, Pickup at that store")
-        actions = "; ".join(f"view, Buy {lbl.split()[0]}, x-safari-{u}, clear=true"
+        phone_body = ("\n".join(h[2].split(" - ")[0] for h in hits)
+                      + "\nTap to open Safari: it fills everything in and stops at Apple sign-in")
+        actions = "; ".join(f"view, Buy {lbl.split()[0]}, {link(u)}, clear=true"
                             for lbl, u in PARTS.values() if u in urls)
         try:
             with urllib.request.urlopen(urllib.request.Request(
                     f"https://ntfy.sh/{NTFY_TOPIC}", data=phone_body.encode(),
                     headers={"Title": f"Duo in stock: {first}" + ("" if MAC else " [cloud]"), "Priority": "urgent",
-                             "Tags": "rotating_light", "Click": "x-safari-" + BUY_URL, "Actions": actions}), timeout=15) as r:
+                             "Tags": "rotating_light", "Click": link(BUY_URL), "Actions": actions}), timeout=15) as r:
                 log(f"ntfy sent: HTTP {r.status}")
         except Exception as e:
             log(f"ntfy failed: {e}")
@@ -144,7 +150,7 @@ def main():
 
 if __name__ == "__main__":
     if "--test-alert" in sys.argv:
-        lbl, url = PARTS["MK1G4LL/A"]; notify([(lbl, url, f"TEST - {lbl} @ Rosedale (Roseville, 5 mi)")], add_to_bag=False); sys.exit()
+        lbl, url = PARTS["MK1G4LL/A"]; notify([(lbl, url, f"TEST - {lbl} @ Rosedale (Roseville, 5 mi)", "R022")], add_to_bag=False); sys.exit()
     if "--test-prefill" in sys.argv:  # opens the 256GB page and pre-fills it, stopping before Add to Bag
         url = PARTS["MK1E4LL/A"][1]; subprocess.run(["open", "-a", "Google Chrome", url]); prefill(url, add_to_bag=False); sys.exit()
     main()
