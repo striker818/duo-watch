@@ -18,7 +18,7 @@ if _local.exists():
         if "=" in _line and not _line.lstrip().startswith("#"):
             _k, _v = _line.split("=", 1); os.environ.setdefault(_k.strip(), _v.strip())
 ZIP = os.environ["DUO_ZIP"]                              # set in local.env or the GitHub secret
-MAX_MILES = float(os.environ.get("DUO_MAX_MILES", "30"))
+US_STATE = os.environ.get("DUO_US_STATE", "MN")              # any Apple Store in this state counts
 NTFY_TOPIC = os.environ.get("DUO_NTFY_TOPIC", "")        # push via ntfy app
 GMAIL_USER = os.environ.get("DUO_GMAIL_USER", "")        # sender gmail
 GMAIL_APP_PW = os.environ.get("DUO_GMAIL_APP_PW", "")    # gmail app password
@@ -49,7 +49,7 @@ def check():
         dist = float(str(s.get("storedistance", 999)).split()[0] or 999)
         for part, (label, url) in PARTS.items():
             p = s.get("partsAvailability", {}).get(part, {})
-            if p.get("pickupDisplay") == "available" and dist <= MAX_MILES:
+            if p.get("pickupDisplay") == "available" and s.get("state") == US_STATE:
                 hits.append((label, url, f'{label} @ {s.get("storeName")} ({s.get("city")}, {dist:.0f} mi) - {p.get("pickupSearchQuote", "")}'))
     return hits, len(stores)
 
