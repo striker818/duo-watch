@@ -136,7 +136,7 @@ def prefill(url, add_to_bag=True):
     log(f"prefill: {(r.stdout or r.stderr).strip()}")
 
 def track(hits):
-    """Record how long each size stays in stock at each store. Times are only as precise as the 90s polling."""
+    """Record how long each size stays in stock at each store. Times are only as precise as the 35s polling."""
     now = time.time()
     current = {h[2].split(" (")[0] for h in hits}                 # "512GB Star White T-Mobile @ Mall of America"
     opened = json.loads(OPEN.read_text()) if OPEN.exists() else {}
@@ -169,7 +169,7 @@ def history():
     for item in sorted({r["item"] for r in rows}):
         m = [float(r["minutes"]) for r in rows if r["item"] == item]
         print(f"{item}: {len(m)} windows, average {sum(m) / len(m):.1f} min, shortest {min(m):.1f}, longest {max(m):.1f}")
-    print("(times are within about 90 seconds, the polling interval)")
+    print("(times are within about 35 seconds, the polling interval)")
 
 def main():
     if BLOCKED.exists() and time.time() - BLOCKED.stat().st_mtime < BACKOFF:
