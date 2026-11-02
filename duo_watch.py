@@ -34,8 +34,8 @@ BLOCKED = STATE.with_name(STATE.name + ".blocked")   # touched when Apple rate-l
 BACKOFF = 600   # seconds to pause after a block; a test block (polling every 3s) lasted 25+ min and checking
                 # during it may extend it
 MAC = sys.platform == "darwin"                           # False on the GitHub Actions runner
-PERIOD = 36     # seconds between checks per tracker (Apple allows about 1 per 30s per IP); the Mac checks on clock
-                # slot 0 and the cloud on slot 18, so together they check every 18s
+PERIOD = 48     # seconds between checks per tracker (36s alone still got the Mac blocked ~hourly); the Mac checks on clock
+                # slot 0 and the cloud on slot 24, so together they check every 24s
 
 # /shop/fulfillment-messages started returning HTTP 541 for all parts (Nov 2026); this one still works
 URL = ("https://www.apple.com/shop/retail/pickup-message?"
@@ -138,7 +138,7 @@ def prefill(url, add_to_bag=True):
     log(f"prefill: {(r.stdout or r.stderr).strip()}")
 
 def track(hits):
-    """Record how long each size stays in stock at each store. Times are only as precise as the 36s polling."""
+    """Record how long each size stays in stock at each store. Times are only as precise as the 48s polling."""
     now = time.time()
     current = {h[2].split(" (")[0] for h in hits}                 # "512GB Star White T-Mobile @ Mall of America"
     opened = json.loads(OPEN.read_text()) if OPEN.exists() else {}
@@ -171,7 +171,7 @@ def history():
     for item in sorted({r["item"] for r in rows}):
         m = [float(r["minutes"]) for r in rows if r["item"] == item]
         print(f"{item}: {len(m)} windows, average {sum(m) / len(m):.1f} min, shortest {min(m):.1f}, longest {max(m):.1f}")
-    print("(times are within about 36 seconds, the polling interval)")
+    print("(times are within about 48 seconds, the polling interval)")
 
 def main():
     if BLOCKED.exists() and time.time() - BLOCKED.stat().st_mtime < BACKOFF:
