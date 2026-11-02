@@ -7,9 +7,12 @@ from email.message import EmailMessage
 from pathlib import Path
 
 BASE = "https://www.apple.com/shop/buy-iphone/iphone-duo/7.6-inch-display-"
+# these params make the page open with Finance > Apple Card Monthly Installments and T-Mobile already chosen
+# (no trade-in is the default; AppleCare can't be preset from the URL)
+PRESET = "?purchaseOption=bfi&cppart=TMOBILE_IPHONEDUO"
 PARTS = {  # part number -> (label, buy page)
-    "MK1E4LL/A": ("256GB Star White T-Mobile", BASE + "256gb-star-white-t-mobile"),
-    "MK1G4LL/A": ("512GB Star White T-Mobile", BASE + "512gb-star-white-t-mobile"),
+    "MK1E4LL/A": ("256GB Star White T-Mobile", BASE + "256gb-star-white-t-mobile" + PRESET),
+    "MK1G4LL/A": ("512GB Star White T-Mobile", BASE + "512gb-star-white-t-mobile" + PRESET),
 }
 # personal settings (ntfy topic, email, gmail app password) live in local.env next to this file, which git ignores
 _local = Path(__file__).with_name("local.env")
@@ -70,7 +73,7 @@ def notify(hits, add_to_bag=True):
         # plus one button per in-stock size
         first = hits[0][2].split(" (")[0].replace(" Star White T-Mobile", "")       # "512GB @ Mall of America"
         phone_body = ("\n".join(t.split(" - ")[0] for *_, t in hits)
-                      + "\nFinance > Apple Card Monthly > T-Mobile > No AppleCare > Pickup at that store")
+                      + "\nOpens with Apple Card Monthly + T-Mobile set. Tap No AppleCare, Add to Bag, Pickup at that store")
         actions = "; ".join(f"view, Buy {lbl.split()[0]}, {u}, clear=true"
                             for lbl, u in PARTS.values() if u in urls)
         try:
@@ -96,19 +99,24 @@ PREFILL_AS = '''on run argv
   set u to item 1 of argv
   tell application "Google Chrome"
     repeat 60 times
-      repeat with w in windows
-        repeat with t in tabs of w
-          if URL of t starts with u and not (loading of t) then
-            execute t javascript (item 2 of argv)
-            repeat 40 times
-              delay 1
-              set s to execute t javascript "window.__duoPrefill || ''"
-              if s starts with "ready" or s starts with "adding" or s starts with "stopped" then return s
-            end repeat
-            return "no result: " & s
-          end if
+      set found to missing value
+      try -- tabs can open/close while we scan; just rescan next round
+        repeat with w in windows
+          repeat with t in tabs of w
+            if URL of t starts with u and not (loading of t) then set found to contents of t
+          end repeat
         end repeat
-      end repeat
+      end try
+      if found is not missing value then
+        execute found javascript (item 2 of argv)
+        set s to ""
+        repeat 40 times
+          delay 1
+          set s to execute found javascript "window.__duoPrefill || ''"
+          if s starts with "ready" or s starts with "adding" or s starts with "stopped" then return s
+        end repeat
+        return "no result: " & s
+      end if
       delay 0.5
     end repeat
   end tell
