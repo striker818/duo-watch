@@ -69,18 +69,19 @@ def notify(hits, add_to_bag=True):
         for u in urls:
             subprocess.run(["open", "-a", "Google Chrome", u])
     if NTFY_TOPIC:
-        # phone push: title says size + store, tapping opens the buy page (Apple Store app if installed),
+        # phone push: title says size + store; links use x-safari-https:// (iOS 17+) so they open in Safari,
+        # which keeps the Apple Card + T-Mobile presets (the Apple Store app ignores them)
         # plus one button per in-stock size
         first = hits[0][2].split(" (")[0].replace(" Star White T-Mobile", "")       # "512GB @ Mall of America"
         phone_body = ("\n".join(t.split(" - ")[0] for *_, t in hits)
                       + "\nOpens with Apple Card Monthly + T-Mobile set. Tap No AppleCare, Add to Bag, Pickup at that store")
-        actions = "; ".join(f"view, Buy {lbl.split()[0]}, {u}, clear=true"
+        actions = "; ".join(f"view, Buy {lbl.split()[0]}, x-safari-{u}, clear=true"
                             for lbl, u in PARTS.values() if u in urls)
         try:
             with urllib.request.urlopen(urllib.request.Request(
                     f"https://ntfy.sh/{NTFY_TOPIC}", data=phone_body.encode(),
                     headers={"Title": f"Duo in stock: {first}" + ("" if MAC else " [cloud]"), "Priority": "urgent",
-                             "Tags": "rotating_light", "Click": BUY_URL, "Actions": actions}), timeout=15) as r:
+                             "Tags": "rotating_light", "Click": "x-safari-" + BUY_URL, "Actions": actions}), timeout=15) as r:
                 log(f"ntfy sent: HTTP {r.status}")
         except Exception as e:
             log(f"ntfy failed: {e}")
