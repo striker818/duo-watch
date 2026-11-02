@@ -1,26 +1,42 @@
 name: duo-check
-# Cloud backup for the Mac watcher. GitHub runs */5 cron on a best-effort basis (often 5-15 min late),
-# so each run checks 4 times, 60s apart.
+# Fast cloud tracker: checks every 30s from GitHub's servers, so if Apple rate-limits it, only GitHub's IP is
+# blocked and the Mac watcher keeps working. One run loops for ~5h45m; the hourly cron queues the next run
+# (concurrency keeps it to one at a time). Sends the same phone push (tagged [cloud]) and records how long
+# stock lasts in data/stock_history.csv, committed back to the repo.
 on:
-  schedule: [{cron: "*/5 * * * *"}]
+  schedule: [{cron: "0 * * * *"}]
   workflow_dispatch:
+    inputs:
+      minutes: {description: "How long to run", default: "345"}
 concurrency: {group: duo-check, cancel-in-progress: false}
+permissions: {contents: write}
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 355
     env:
       DUO_ZIP: ${{ secrets.DUO_ZIP }}
       DUO_NTFY_TOPIC: ${{ secrets.DUO_NTFY_TOPIC }}
       DUO_STATE: state/duo_watch_state.json
+      DUO_OPEN: state/stock_open.json
+      DUO_HISTORY: data/stock_history.csv
       DUO_LOG: duo_watch.log
+      MINUTES: ${{ inputs.minutes || '345' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
         with: {path: state, key: "duo-state-${{ github.run_id }}", restore-keys: duo-state-}
       - run: |
-          mkdir -p state
-          for i in 1 2 3 4; do python3 duo_watch.py; if [ $i -lt 4 ]; then sleep 60; fi; done
+          mkdir -p state data
+          git config user.name "duo-watch bot"; git config user.email "actions@users.noreply.github.com"
+          end=$((SECONDS + MINUTES * 60))
+          while [ $SECONDS -lt $end ]; do
+            python3 duo_watch.py
+            if [ -n "$(git status --porcelain data)" ]; then   # a stock window closed: save it to the repo
+              git add data && git commit -qm "Stock history update" && git pull -q --rebase && git push -q || echo "history push failed"
+            fi
+            sleep 30
+          done
       - uses: actions/cache/save@v4
         if: always()
         with: {path: state, key: "duo-state-${{ github.run_id }}"}
