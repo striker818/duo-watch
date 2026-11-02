@@ -70,24 +70,18 @@ def notify(hits, add_to_bag=True):
         for u in urls:
             subprocess.run(["open", "-a", "Google Chrome", u])
     if NTFY_TOPIC:
-        # phone push: title says size + store; links use x-safari-https:// (iOS 17+) so they open in Safari,
-        # which keeps the Apple Card + T-Mobile presets (the Apple Store app ignores them)
-        # plus one button per in-stock size. #duo=<store> starts the Safari userscript (duo-prefill.user.js), which
-        # picks No AppleCare, adds to bag, selects that store and goes on to Apple's sign-in page
-        store = {}
-        for _, u, _, st in hits:
-            store.setdefault(u, st)
-        link = lambda u: f"x-safari-{u}#duo={store[u]}"
+        # phone push: title says size + store; tapping opens the buy page in the Apple Store app (stays signed in),
+        # plus one button per in-stock size. The app ignores URL presets, so the body lists the choices to tap
         first = hits[0][2].split(" (")[0].replace(" Star White T-Mobile", "")       # "512GB @ Mall of America"
         phone_body = ("\n".join(h[2].split(" - ")[0] for h in hits)
-                      + "\nTap to open Safari: it fills everything in and stops at Apple sign-in")
-        actions = "; ".join(f"view, Buy {lbl.split()[0]}, {link(u)}, clear=true"
+                      + "\nNo trade-in > Finance > Apple Card Monthly > T-Mobile > No AppleCare > Add to Bag > Pickup at that store")
+        actions = "; ".join(f"view, Buy {lbl.split()[0]}, {u}, clear=true"
                             for lbl, u in PARTS.values() if u in urls)
         try:
             with urllib.request.urlopen(urllib.request.Request(
                     f"https://ntfy.sh/{NTFY_TOPIC}", data=phone_body.encode(),
                     headers={"Title": f"Duo in stock: {first}" + ("" if MAC else " [cloud]"), "Priority": "urgent",
-                             "Tags": "rotating_light", "Click": link(BUY_URL), "Actions": actions}), timeout=15) as r:
+                             "Tags": "rotating_light", "Click": BUY_URL, "Actions": actions}), timeout=15) as r:
                 log(f"ntfy sent: HTTP {r.status}")
         except Exception as e:
             log(f"ntfy failed: {e}")
