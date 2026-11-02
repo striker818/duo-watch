@@ -28,6 +28,8 @@ GMAIL_APP_PW = os.environ.get("DUO_GMAIL_APP_PW", "")    # gmail app password
 EMAIL_TO = os.environ.get("DUO_EMAIL_TO", "")
 STATE = Path(os.environ.get("DUO_STATE", Path.home() / ".duo_watch_state.json"))
 LOG = Path(os.environ.get("DUO_LOG", Path.home() / "duo_watch.log"))
+HISTORY = Path(os.environ.get("DUO_HISTORY", Path.home() / "duo_stock_history.csv"))  # one row per stock window
+OPEN = Path(os.environ.get("DUO_OPEN", Path.home() / ".duo_stock_open.json"))        # windows still in stock
 MAC = sys.platform == "darwin"                           # False on the GitHub Actions runner
 
 # /shop/fulfillment-messages started returning HTTP 541 for all parts (Nov 2026); this one still works
@@ -130,6 +132,42 @@ def prefill(url, add_to_bag=True):
     r = subprocess.run(["osascript", "-e", PREFILL_AS, url, js], capture_output=True, text=True, timeout=120)
     log(f"prefill: {(r.stdout or r.stderr).strip()}")
 
+def track(hits):
+    """Record how long each size stays in stock at each store. Times are only as precise as the 90s polling."""
+    now = time.time()
+    current = {h[2].split(" (")[0] for h in hits}                 # "512GB Star White T-Mobile @ Mall of America"
+    opened = json.loads(OPEN.read_text()) if OPEN.exists() else {}
+    for key in current - opened.keys():
+        opened[key] = now
+        log(f"stock window opened: {key}")
+    for key in opened.keys() - current:
+        start = opened.pop(key)
+        new = not HISTORY.exists()
+        with HISTORY.open("a") as f:
+            if new:
+                f.write("item,store,in_stock_at,sold_out_at,minutes\n")
+            item, store = key.split(" @ ", 1)
+            f.write(f'{item},{store},{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start))},'
+                    f'{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))},{(now - start) / 60:.1f}\n')
+        log(f"stock window closed: {key} after {(now - start) / 60:.1f} min")
+    OPEN.write_text(json.dumps(opened))
+
+def history():
+    """Print every stock window seen so far, plus averages per size."""
+    import csv
+    rows = list(csv.DictReader(HISTORY.open())) if HISTORY.exists() else []
+    opened = json.loads(OPEN.read_text()) if OPEN.exists() else {}
+    if not rows and not opened:
+        return print("No stock seen yet.")
+    for r in rows:
+        print(f'{r["in_stock_at"]}  {r["item"]:<28} {r["store"]:<18} sold out after {float(r["minutes"]):.1f} min')
+    for key, start in opened.items():
+        print(f'{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start))}  {key}  STILL IN STOCK ({(time.time() - start) / 60:.1f} min so far)')
+    for item in sorted({r["item"] for r in rows}):
+        m = [float(r["minutes"]) for r in rows if r["item"] == item]
+        print(f"{item}: {len(m)} windows, average {sum(m) / len(m):.1f} min, shortest {min(m):.1f}, longest {max(m):.1f}")
+    print("(times are within about 90 seconds, the polling interval)")
+
 def main():
     try:
         hits, n = check()
@@ -141,10 +179,13 @@ def main():
     elif not hits:
         log(f"no stock ({n} stores checked)")
     STATE.write_text(json.dumps([h[2] for h in hits]))
+    track(hits)
 
 if __name__ == "__main__":
     if "--test-alert" in sys.argv:
         lbl, url = PARTS["MK1G4LL/A"]; notify([(lbl, url, f"TEST - {lbl} @ Rosedale (Roseville, 5 mi)", "R022")], add_to_bag=False); sys.exit()
+    if "--history" in sys.argv:
+        history(); sys.exit()
     if "--test-prefill" in sys.argv:  # opens the 256GB page and pre-fills it, stopping before Add to Bag
         url = PARTS["MK1E4LL/A"][1]; subprocess.run(["open", "-a", "Google Chrome", url]); prefill(url, add_to_bag=False); sys.exit()
     main()
