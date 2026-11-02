@@ -20,7 +20,7 @@ jobs:
         with: {path: state, key: "duo-state-${{ github.run_id }}", restore-keys: duo-state-}
       - run: |
           mkdir -p state
-          for i in 1 2 3 4; do python3 duo_watch.py; [ $i -lt 4 ] && sleep 60; done
+          for i in 1 2 3 4; do python3 duo_watch.py; if [ $i -lt 4 ]; then sleep 60; fi; done
       - uses: actions/cache/save@v4
         if: always()
         with: {path: state, key: "duo-state-${{ github.run_id }}"}
