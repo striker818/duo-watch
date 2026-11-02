@@ -1,5 +1,5 @@
 name: duo-check
-# Fast cloud tracker: checks every 35s from GitHub's servers, so if Apple rate-limits it, only GitHub's IP is
+# Fast cloud tracker: checks every 36s from GitHub's servers, taking turns with the Mac (cloud on clock slot 18, Mac on 0), so if Apple rate-limits it, only GitHub's IP is
 # blocked and the Mac watcher keeps working. One run loops for ~5h45m; the hourly cron queues the next run
 # (concurrency keeps it to one at a time). Sends the same phone push (tagged [cloud]) and records how long
 # stock lasts in data/stock_history.csv, committed back to the repo.
@@ -31,11 +31,11 @@ jobs:
           git config user.name "duo-watch bot"; git config user.email "actions@users.noreply.github.com"
           end=$((SECONDS + MINUTES * 60))
           while [ $SECONDS -lt $end ]; do
+            sleep $(python3 -c 'import time; print(round((18 - time.time()) % 36, 2))')   # wait for this tracker's clock slot
             python3 duo_watch.py
             if [ -n "$(git status --porcelain data)" ]; then   # a stock window closed: save it to the repo
               git add data && git commit -qm "Stock history update" && git pull -q --rebase && git push -q || echo "history push failed"
             fi
-            sleep 35   # 10s got blocked ~13 min in, 20s ~50 min in: Apple allows ~1 check/30s per IP with a short burst
           done
       - uses: actions/cache/save@v4
         if: always()

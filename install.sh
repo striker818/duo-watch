@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs the iPhone Duo watcher to run every 35 seconds on this Mac.
+# Installs the iPhone Duo watcher to check every 36 seconds on this Mac, on clock slot 0 (the cloud tracker takes slot 18).
 # Personal settings go in local.env next to this script (git ignores it); see local.env.example.
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,8 +10,8 @@ cat > "$PLIST" <<P
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>com.mike.duowatch</string>
-<key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>$DIR/duo_watch.py</string></array>
-<key>StartInterval</key><integer>35</integer>
+<key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>$DIR/duo_watch.py</string><string>--loop</string><string>0</string></array>
+<key>KeepAlive</key><true/>
 <key>RunAtLoad</key><true/>
 <key>StandardErrorPath</key><string>$HOME/duo_watch.err</string>
 <key>StandardOutPath</key><string>$HOME/duo_watch.out</string>
