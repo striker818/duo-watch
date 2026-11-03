@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs the iPhone Duo watcher to check every 48 seconds on this Mac, on clock slot 0 (the cloud tracker takes slot 24).
+# Installs the iPhone Duo watcher to check every 60 seconds on this Mac, on clock slot 0 (the cloud tracker takes slot 30).
 # Personal settings go in local.env next to this script (git ignores it); see local.env.example.
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
