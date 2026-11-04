@@ -88,10 +88,15 @@
       if (!first) return other && act("thirdparty", () => other.click(), 3000) ? say("chose Someone else will pick it up") : say("waiting for the pickup form");
       // the first email/phone on the page are the pickup person's; yours further down are prefilled from your account
       const want = { firstName: pk.first, lastName: pk.last, emailAddress: pk.email, fullDaytimePhone: pk.phone };
+      // Apple usually prefills the right person now, so this normally does nothing; it only steps in for a blank or a
+      // different value (an old pickup person). Masked values (t•••8@gmail.com) mean Apple already has it: leave them.
+      // Phones compare by digits since Apple reformats them as (651) 366-...
+      const norm = (name, v) => name === "fullDaytimePhone" ? String(v).replace(/\D/g, "") : String(v).trim().toLowerCase();
       const filled = [];
       for (const [name, v] of Object.entries(want)) {
         const box = vis(`input[name=${name}]`)[0];
-        if (box && v && !box.value) { setValue(box, v); filled.push(name); }
+        if (box && v && !box.value.includes("•") && norm(name, box.value) !== norm(name, v) && act("fill_" + name, () => setValue(box, v), 1000))
+          filled.push(name);
       }
       if (filled.length) return say("filled in pickup person " + pk.first + " " + (pk.last || "") + " (" + filled.join(", ") + ")");
     }
@@ -146,7 +151,9 @@
     // with Apple Card Monthly the button is bag-checkout-button, and the first click opens an Apple Card pop-up that
     // has its own copy of it; click the pop-up's one when it's open, or we just keep reopening the pop-up
     const sel = "button[data-autom=checkout], button[data-autom=bag-checkout-button]";
-    const b = vis(`[aria-modal=true] :is(${sel}), [role=dialog] :is(${sel})`)[0] || vis(sel)[0];
+    const pop = vis(`[aria-modal=true] :is(${sel}), [role=dialog] :is(${sel})`)[0];
+    if (pop) return act("checkout_popup", () => pop.click(), 2000) ? say("clicked Check Out in the Apple Card pop-up") : say("opening checkout...");
+    const b = vis(sel)[0];
     if (!b) return say("waiting for Check Out");
     return act("checkout", () => b.click()) ? say("clicked Check Out") : say("opening checkout...");
   }

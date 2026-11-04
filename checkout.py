@@ -20,8 +20,9 @@ import duo_watch as w
 
 HERE = Path(__file__).parent
 LIMIT = 20 * 60   # give up after 20 minutes
-TICK = 0.4
-STUCK = 40        # same non-WAIT status this many ticks in a row (~25s with osascript overhead) -> ask for help
+TICK = 0.25       # how often Python reads the status; the clicking itself happens in the page (see LOOP_MS)
+LOOP_MS = 150     # in-page step interval: no osascript round trip per click
+STUCK = 25        # seconds with the same non-WAIT status -> ask for help
 
 # Allow JavaScript from Apple Events is per Chrome profile, so open in a window whose profile allows it
 OPEN_TAB = '''on run argv
@@ -91,6 +92,7 @@ SETTING = ("Safari > Develop > Allow JavaScript from Apple Events" if SAFARI
 
 # the new window isn't always front right away (another window can be), so return the id that wasn't there before
 SAFARI_OPEN = '''on run argv
+  tell application "Finder" to set screenBox to bounds of window of desktop
   tell application "Safari"
     activate
     set oldIds to id of every window
@@ -98,7 +100,10 @@ SAFARI_OPEN = '''on run argv
     repeat 40 times
       set newIds to id of every window   -- fetch the list first; iterating "id of every window" directly fails
       repeat with i from 1 to count of newIds
-        if oldIds does not contain (item i of newIds) then return (item i of newIds)
+        if oldIds does not contain (item i of newIds) then
+          set bounds of window id (item i of newIds) to screenBox   -- fill the screen so you can see the whole page
+          return (item i of newIds)
+        end if
       end repeat
       delay 0.1
     end repeat
@@ -212,14 +217,35 @@ def alert(tab, status, test):
 def drive(url, store="", store_name="", add_to_bag=True, test=False):
     args = {'store': store, 'storeName': store_name, 'zip': w.ZIP, 'phone': os.environ.get('DUO_TMOBILE_NUMBER', ''),
             'pickup': {k: os.environ.get('DUO_PICKUP_' + k.upper(), '') for k in ('first', 'last', 'email', 'phone')}}
-    step_js = f"var DUO = {json.dumps(args)};\n" + (HERE / "checkout.js").read_text()
-    prefill_js = ("" if add_to_bag else "window.__duoNoBag = true;\n") + (HERE / "prefill.js").read_text()
+    # Install checkout.js as a loop inside the page (re-installed after each page load, since navigation clears it).
+    # Each Python tick then only reads window.__duoStatus, so steps follow each other in ~150ms, not ~600ms.
+    step_src = (HERE / "checkout.js").read_text().rstrip().rstrip(";")
+    prefill_src = (HERE / "prefill.js").read_text()
+    boot_js = f"""var DUO = {json.dumps(args)};
+if (!window.__duoLoop) {{
+  window.__duoStep = () => (
+{step_src}
+  );
+  window.__duoPrefillRun = () => {{
+    window.__duoPrefill = "starting";   // set before prefill's first await, so it never starts twice
+    {"" if add_to_bag else "window.__duoNoBag = true;"}
+{prefill_src}
+  }};
+  window.__duoLoop = setInterval(() => {{
+    let s;
+    try {{ s = window.__duoStep(); }} catch (e) {{ s = "script error: " + e.message; }}
+    if (s === "NEED_PREFILL") {{ window.__duoPrefillRun(); s = "prefill started"; }}
+    window.__duoStatus = s;
+  }}, {LOOP_MS});
+}}
+window.__duoStatus || "starting"
+"""
     tab = open_tab(url)
     w.log(f"checkout: driving {BROWSER} {'window' if SAFARI else 'tab'} {tab} for {store_name or url}")
-    last_raw, same, logged, told, adding, carrier_runs = None, 0, None, None, None, 0
+    last_raw, since, logged, told, adding, carrier_runs, flagged, adds = None, time.time(), None, None, None, 0, None, 0
     end = time.time() + LIMIT
     while time.time() < end:
-        s = raw = js(tab, step_js)
+        s = raw = js(tab, boot_js)
         if s == "__notab__":
             return w.log("checkout: tab was closed - stopping")
         if s == "__loading__":
@@ -229,9 +255,9 @@ def drive(url, store="", store_name="", add_to_bag=True, test=False):
                 s = f"WAIT turn on {SETTING}, then finish by hand"
                 alert(tab, s, test); return w.log("checkout: " + s)
             w.log("checkout: " + s[:300]); time.sleep(1); continue
-        if s == "NEED_PREFILL":
-            js(tab, prefill_js); s = "prefill started"
-        elif s.startswith("prefill: stopped"):
+        if s == "starting":
+            time.sleep(TICK); continue
+        if s.startswith("prefill: stopped"):
             s = "WAIT " + s[9:]
         elif s.startswith("prefill: ready") and not add_to_bag:
             s = "DONE choices are pre-filled (test - not added to bag)"
@@ -240,13 +266,20 @@ def drive(url, store="", store_name="", add_to_bag=True, test=False):
             if carrier_runs > 1:   # back on the buy page after the T-Mobile check and it wants it again: don't loop
                 s = "WAIT Apple asked for the T-Mobile check again - take over from here"
         elif s.startswith("prefill: adding"):
+            # Apple reloads the buy page instead of adding when the form wasn't ready; prefill then runs again.
+            # Allow a couple of retries, then hand over rather than keep clicking Add to Bag
+            adds += raw != last_raw
+            if adds > 3:
+                s = "WAIT Apple keeps bouncing Add to Bag back to the buy page - check the bag and take over"
             # Add to Bag was clicked; if Apple leaves us on the buy page, go to the bag ourselves
             adding = adding or time.time()
             if time.time() - adding > 6:
                 js(tab, "location.href = 'https://www.apple.com/shop/bag'"); adding = None
-        same = same + 1 if raw == last_raw else 0
+        if raw != last_raw:
+            since = time.time()
         last_raw = raw
-        if same == STUCK and not s.startswith(("WAIT", "DONE")):
+        if time.time() - since > STUCK and flagged != raw and not s.startswith(("WAIT", "DONE")):
+            flagged = raw
             s = f"WAIT stuck at: {s} - take over from here"
         if s != logged:
             w.log("checkout: " + s); logged = s

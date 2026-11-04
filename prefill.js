@@ -12,16 +12,17 @@
   // the radios are visually hidden; find the one whose card (label) is on screen
   const shown = sel => [...document.querySelectorAll(sel)].find(e => e.offsetParent || (e.labels && e.labels[0] && e.labels[0].offsetParent));
   async function pick(sel, name, done) {           // done(): another sign it's already chosen (e.g. a collapsed summary)
-    for (let i = 0; i < 40; i++) {                 // ~20s: later sections stay disabled until earlier ones are answered
+    for (let i = 0; i < 130; i++) {                // ~20s: later sections stay disabled until earlier ones are answered
       if (done && done()) return;
       if ([...document.querySelectorAll(sel)].some(e => e.checked)) return;   // already chosen, even if its section is collapsed
       const el = shown(sel);
       if (el && !el.disabled) {
-        ((el.labels && el.labels[0]) || el).click(); await sleep(400);
+        ((el.labels && el.labels[0]) || el).click();
+        for (let j = 0; j < 8 && !el.checked; j++) await sleep(50);   // usually takes effect in well under 400ms
         if (el.checked) return;
         el.click();
       }
-      await sleep(500);
+      await sleep(150);
     }
     throw new Error("could not select " + name);
   }
@@ -30,8 +31,8 @@
 
   try {
     // wait for the page to finish drawing its option cards, or the checks below see a half-built page
-    for (let i = 0; i < 20 && !document.querySelector("input[name=carrierModel]"); i++) await sleep(500);
-    await sleep(500);
+    for (let i = 0; i < 100 && !document.querySelector("input[name=carrierModel]"); i++) await sleep(100);
+    await sleep(150);
     // payment stays disabled until trade-in is answered; pick No trade-in unless something is already chosen
     if (document.querySelector("input[name=tradeupinline]") && !document.querySelector("input[name=tradeupinline]:checked")) {
       status("choosing No trade-in...");
@@ -39,13 +40,13 @@
     }
     status("choosing Finance...");
     // the page remembers earlier choices; reopen the payment section unless it already says Apple Card
-    if (summary() && !acmiChosen()) { summary().click(); await sleep(800); }
+    if (summary() && !acmiChosen()) { summary().click(); await sleep(300); }
     if (!acmiChosen()) {
       await pick("input[name=purchase_option_group][value=finance]", "Finance");
       status("choosing Apple Card Monthly Installments...");
       // the link often preselects it, and the section collapses to a summary before we get here
       await pick("input[data-autom=purchaseOptionbfi]", "Apple Card Monthly Installments", acmiChosen);
-      await sleep(2000);                            // payment section collapses, then carriers re-enable
+      await sleep(600);                             // payment section collapses, then carriers re-enable
     }
     status("choosing T-Mobile...");                 // choosing Finance clears the carrier
     await pick("input[name=carrierModel][value^=TMOBILE_]", "T-Mobile");  // TMOBILE_IPHONEDUO, TMOBILE_IPHONE17...
@@ -53,7 +54,12 @@
     await pick("input[data-autom=noapplecare]", "No AppleCare");
     // carrier iPhones show Continue (to the T-Mobile account check) instead of Add to Bag until the carrier is verified
     let bag, proceed;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 70; i++) {                 // ~10s
+      // going fast, the carrier can get cleared as the payment section settles; pick T-Mobile again if so
+      if (!document.querySelector("input[name=carrierModel]:checked")) {
+        const tm = shown("input[name=carrierModel][value^=TMOBILE_]");
+        if (tm && !tm.disabled) ((tm.labels && tm.labels[0]) || tm).click();
+      }
       // the AppleCare section can redraw after our click (seen in Safari) and drop the choice; pick it again
       if (!document.querySelector("input[name=applecare-options]:checked")) {
         const ac = shown("input[data-autom=noapplecare]");
@@ -61,9 +67,19 @@
       }
       bag = shown("button[data-autom=add-to-cart]"); proceed = shown("button[data-autom=proceed]");
       if ((bag && !bag.disabled) || (proceed && !proceed.disabled)) break;
-      await sleep(500);
+      await sleep(150);
     }
     if (!ADD_TO_BAG) return status("ready - Apple Card, T-Mobile, no AppleCare selected (stopped before " + (bag ? "Add to Bag" : "Continue") + ")", "#248a3d");
+    // the radios update the form a moment after they look selected; clicking before that makes Apple reload the
+    // buy page (seen when going fast), so wait until the form carries T-Mobile + Apple Card + no AppleCare
+    const formReady = b => {
+      if (!b || !b.form) return true;
+      const d = new FormData(b.form);
+      return !!d.get("product") && /^TMOBILE/.test(d.get("cppart") || "") && d.get("purchaseOption") === "bfi"
+        && (d.get("acpart") === null || d.get("acpart") === "none");
+    };
+    const go = bag && !bag.disabled ? bag : proceed;
+    for (let i = 0; i < 40 && !formReady(go); i++) await sleep(75);   // up to ~3s, usually a few hundred ms
     if (bag && !bag.disabled) { status("adding to bag - checkout continues on its own", "#248a3d"); bag.click(); }
     else if (proceed && !proceed.disabled) { status("continuing to T-Mobile", "#248a3d"); proceed.click(); }
     else throw new Error("neither Add to Bag nor Continue is enabled");
