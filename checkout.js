@@ -37,6 +37,16 @@
     .filter(e => (e.required || e.getAttribute("aria-required") === "true") && !e.value && !e.disabled)
     .map(e => (e.labels && e.labels[0] ? text(e.labels[0]) : e.name || e.id));
   const placeOrder = () => byText("button", /place (your )?order/i);
+  // Apple sometimes lands somewhere odd after Add to Bag (a 404, or the iPhone overview when the buy page reloads as
+  // stock runs out). The phone is usually already in the bag, so go to the bag and carry on, up to 3 times.
+  function rescue(why) {
+    const n = +(sessionStorage.__duoRescues || 0);
+    const where = location.pathname + location.search;
+    if (n >= 3) return say("WAIT " + why + " (" + where + ") - open apple.com/shop/bag and check out by hand");
+    if (act("rescue", () => { sessionStorage.__duoRescues = n + 1; location.href = "https://www.apple.com/shop/bag"; }, 4000))
+      return say("off track: " + why + " at " + where + " - reopening the bag");
+    return say("reopening the bag...");
+  }
 
   function next(step) {
     const b = [document.getElementById("rs-checkout-continue-button-bottom")].find(seen) || byText("button", /^continue\b/i);
@@ -60,11 +70,18 @@
       }, 8000)) return say("searching stores near " + DUO.zip);
       return say("waiting for the store list");
     }
-    const want = stores.find(r => DUO.store && r.value === DUO.store)
+    let want = stores.find(r => DUO.store && r.value === DUO.store)
       || stores.find(r => DUO.storeName && text(labelOf(r)).includes(DUO.storeName));
-    if (!want) return say("WAIT pick " + (DUO.storeName || "a store") + " for pickup - I couldn't find it in the list");
-    if (want.disabled) return say("WAIT " + DUO.storeName + " no longer offers pickup - pick another store");
-    if (!want.checked) return act("store", () => labelOf(want).click(), 3000) ? say("picked " + DUO.storeName) : say("selecting the store...");
+    if (!want || want.disabled) {
+      // the alerted store sold out (or isn't listed): take any other nearby store that still offers pickup
+      const other = stores.find(r => r.checked && !r.disabled) || stores.find(r => !r.disabled);
+      if (!other) return say("WAIT " + (DUO.storeName || "the store") + " sold out and no other store nearby offers pickup right now");
+      const name = text(labelOf(other)).slice(0, 40);
+      if (!other.checked) return act("store_alt", () => labelOf(other).click(), 1500)
+        ? say("switched store: " + (DUO.storeName || "store") + " sold out, picked " + name) : say("selecting another store...");
+      want = other;
+    }
+    if (!want.checked) return act("store", () => labelOf(want).click(), 1500) ? say("picked " + DUO.storeName) : say("selecting the store...");
     // earliest pickup day/time: Apple shows either a <select> or radio groups, depending on the store
     const sel = vis("select").find(e => /time|slot|date/i.test(e.id + e.name) && !e.value);
     const opt = sel && [...sel.options].find(o => o.value && !o.disabled);
@@ -113,7 +130,7 @@
   }
 
   if (!/^https?:/.test(url)) return "page loading...";   // Safari's new window is about:blank for a moment
-  if (/\/shop\/404/.test(url)) return say("WAIT Apple showed a 404 - open apple.com/shop/bag and check out by hand");
+  if (/\/shop\/404/.test(url) || /page not found/i.test(document.title)) return rescue("Apple showed a 404");
   if (placeOrder()) {
     // Review: tick the carrier's Terms & Conditions box(es) so the order is ready; Place Your Order stays yours
     const terms = [...document.querySelectorAll("input[type=checkbox]")]
@@ -166,5 +183,6 @@
     if (/^Review/i.test(step)) return say("loading the order review...");                  // Place Your Order not drawn yet
     return say("WAIT checkout step '" + step + "' needs you");
   }
+  if (/(^|\.)apple\.com$/.test(location.hostname)) return rescue("unexpected page '" + document.title + "'");
   return say("WAIT unexpected page (" + document.title + ") - take over");
 })();

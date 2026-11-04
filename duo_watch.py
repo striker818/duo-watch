@@ -3,7 +3,7 @@
 (checkout.py) up to the point it needs you.
 Config: iPhone Duo (T-Mobile, no AppleCare, Apple Card Monthly Installments) Star White 256GB (MK1E4LL/A) + 512GB (MK1G4LL/A), pickup near DUO_ZIP.
 """
-import json, os, smtplib, subprocess, sys, time, urllib.request
+import json, os, smtplib, subprocess, sys, threading, time, urllib.request
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -31,6 +31,7 @@ STATE = Path(os.environ.get("DUO_STATE", Path.home() / ".duo_watch_state.json"))
 LOG = Path(os.environ.get("DUO_LOG", Path.home() / "duo_watch.log"))
 HISTORY = Path(os.environ.get("DUO_HISTORY", Path.home() / "duo_stock_history.csv"))  # one row per stock window
 OPEN = Path(os.environ.get("DUO_OPEN", Path.home() / ".duo_stock_open.json"))        # windows still in stock
+OFFLINE = STATE.with_name(STATE.name + ".offline")   # {"since": t, "alerted": bool} while checks keep failing
 BLOCKED = STATE.with_name(STATE.name + ".blocked")   # touched when Apple rate-limits us (HTTP 541)
 BACKOFF = 600   # seconds to pause after a block; a test block (polling every 3s) lasted 25+ min and checking
                 # during it may extend it
@@ -66,8 +67,13 @@ def check():
     return hits, len(stores)
 
 CHECKOUT_PID = Path.home() / ".duo_checkout.pid"
+_checkout_lock = threading.Lock()   # the cloud listener and the Mac's own check can both start one
 
 def start_checkout(hits, add_to_bag=True):
+    with _checkout_lock:
+        _start_checkout(hits, add_to_bag)
+
+def _start_checkout(hits, add_to_bag):
     """Start checkout.py in the background on one hit: today's pickup first, then 256GB before 512GB.
     Skips if a checkout from the last 20 minutes is still running, so the bag only ever gets one phone."""
     if CHECKOUT_PID.exists() and time.time() - CHECKOUT_PID.stat().st_mtime < 20 * 60:
@@ -89,6 +95,12 @@ def start_checkout(hits, add_to_bag=True):
 def notify(hits, add_to_bag=True):
     if MAC:  # first, every second counts: Chrome starts on the buy page while the alerts go out
         start_checkout(hits, add_to_bag)
+    elif NTFY_TOPIC:  # cloud: tell the Mac right away so it starts checking out (see listen())
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                f"https://ntfy.sh/{NTFY_TOPIC}-mac", data=json.dumps([[h[0], h[2], h[3], h[4]] for h in hits]).encode()), timeout=10)
+        except Exception as e:
+            log(f"Mac trigger failed: {e}")
     urls = list(dict.fromkeys(u for _, u, *_ in hits))
     BUY_URL = urls[0]
     body = ("iPhone Duo IN STOCK for pickup:\n" + "\n".join(h[2] for h in hits)
@@ -122,6 +134,60 @@ def notify(hits, add_to_bag=True):
                 s.login(GMAIL_USER, GMAIL_APP_PW); s.send_message(m)
         except Exception as e:
             log(f"email failed: {e}")
+
+def mac_notice(title, msg, sound="Basso"):
+    subprocess.run(["osascript", "-e", f'on run argv\ndisplay notification (item 1 of argv) with title (item 2 of argv) sound name "{sound}"\nend run', msg, title])
+
+def phone_notice(title, msg):
+    if NTFY_TOPIC:
+        try:
+            urllib.request.urlopen(urllib.request.Request(f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode(),
+                                                          headers={"Title": title, "Tags": "warning"}), timeout=15)
+        except Exception as e:
+            log(f"ntfy failed: {e}")
+
+def offline(failed, err=""):
+    """Mac only: warn when checks keep failing (Wi-Fi/DNS down), since the watcher is blind then. The warning shows on
+    the Mac right away; the phone hears about it once the Mac is back online (it can't send while offline)."""
+    if not MAC:
+        return
+    st = json.loads(OFFLINE.read_text()) if OFFLINE.exists() else None
+    if failed:
+        st = st or {"since": time.time(), "alerted": False}
+        if not st["alerted"] and time.time() - st["since"] >= 60:
+            st["alerted"] = True
+            log("offline for over a minute - alerting")
+            mac_notice("Duo watcher is offline", f"Can't reach Apple since {time.strftime('%-I:%M %p', time.localtime(st['since']))}: {err[:80]}")
+        OFFLINE.write_text(json.dumps(st))
+    elif st:
+        OFFLINE.unlink()
+        if st["alerted"]:
+            span = f"{time.strftime('%-I:%M', time.localtime(st['since']))}-{time.strftime('%-I:%M %p')}"
+            log(f"back online (was offline {span})")
+            phone_notice("Duo Mac watcher was offline", f"The Mac couldn't check from {span}. The cloud tracker kept checking. It's back now.")
+
+def listen():
+    """Mac: start checkout the moment the cloud tracker sees stock. The cloud posts its hits to the ntfy topic
+    <DUO_NTFY_TOPIC>-mac (the phone isn't subscribed to it); this keeps a connection open to ntfy.sh, not Apple, so it
+    adds no Apple requests. That halves how long a drop goes unnoticed and covers the Mac while Apple has it blocked."""
+    labels = {lbl: url for lbl, url in PARTS.values()}
+    while True:
+        try:
+            with urllib.request.urlopen(f"https://ntfy.sh/{NTFY_TOPIC}-mac/json", timeout=120) as r:  # keepalive every ~45s
+                for line in r:
+                    m = json.loads(line)
+                    if m.get("event") != "message" or time.time() - m.get("time", 0) > 90:
+                        continue
+                    # only our own items: the buy link comes from PARTS, never from the message
+                    hits = [(lbl, labels[lbl], text, store, name) for lbl, text, store, name in json.loads(m["message"])
+                            if lbl in labels]
+                    if hits:
+                        log("cloud saw stock: " + " | ".join(h[2] for h in hits))
+                        start_checkout(hits)
+                        subprocess.run(["osascript", "-e", 'on run argv\ndisplay notification (item 1 of argv) with title "iPhone Duo in stock! (cloud)" sound name "Glass"\nend run', hits[0][2]])
+        except Exception as e:
+            log(f"cloud listener reconnecting: {e}")
+            time.sleep(5)
 
 def track(hits):
     """Record how long each size stays in stock at each store. Times are only as precise as the 60s polling."""
@@ -167,7 +233,8 @@ def main():
     except Exception as e:
         if getattr(e, "code", None) == 541:
             BLOCKED.touch(); log(f"blocked by Apple (HTTP 541) - pausing checks for {BACKOFF // 60} min"); return
-        log(f"check error: {e}"); return
+        log(f"check error: {e}"); offline(True, str(e)); return
+    offline(False)
     track(hits)   # first, so a failing alert or checkout can't lose the drop record
     prev = json.loads(STATE.read_text()) if STATE.exists() else []
     if hits and [h[2] for h in hits] != prev:
@@ -188,8 +255,16 @@ if __name__ == "__main__":
     if "--loop" in sys.argv:  # --loop N: check whenever the clock is N seconds into each PERIOD-second slot
         offset = int(sys.argv[sys.argv.index("--loop") + 1])
         checked = 0
+        if MAC and NTFY_TOPIC:
+            threading.Thread(target=listen, daemon=True).start()
+        last = time.time()
         while True:
             time.sleep((offset - time.time()) % PERIOD or PERIOD)
+            if MAC and time.time() - last > 3 * PERIOD:  # the Mac slept (lid closed, power): nothing ran meanwhile
+                span = f"{time.strftime('%-I:%M', time.localtime(last))}-{time.strftime('%-I:%M %p')}"
+                log(f"Mac was asleep {span} - no checks ran")
+                phone_notice("Duo Mac watcher was asleep", f"The Mac slept from {span} and didn't check. The cloud tracker kept checking. Keep the Mac awake and plugged in.")
+            last = time.time()
             if MAC and time.time() - checked > 3 * 3600:  # Chrome updates can switch Apple Events JS back off
                 checked = time.time()
                 try:
