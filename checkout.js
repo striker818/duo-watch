@@ -117,6 +117,9 @@
   }
   if (/\/shop\/bag/.test(url)) {
     if (/bag is empty/i.test(document.body.innerText)) return say("WAIT the bag is empty - nothing got added");
+    // leftovers in the bag would go into the same order; let you decide rather than check out with them
+    const items = vis("button[data-autom=bag-item-remove-button]").length;
+    if (items > 1) return say("WAIT the bag has " + items + " items - remove all but the phone, then I'll check out");
     // with Apple Card Monthly the button is bag-checkout-button, and the first click opens an Apple Card pop-up that
     // has its own copy of it; click the pop-up's one when it's open, or we just keep reopening the pop-up
     const sel = "button[data-autom=checkout], button[data-autom=bag-checkout-button]";
@@ -130,6 +133,7 @@
     if (/^PickupContact/i.test(step)) return contact();
     if (/^Billing/i.test(step)) return billing();
     if (!step || /processing/i.test(document.title)) return say("loading checkout...");  // brief page after sign-in
+    if (/^Review/i.test(step)) return say("loading the order review...");                  // Place Your Order not drawn yet
     return say("WAIT checkout step '" + step + "' needs you");
   }
   return say("WAIT unexpected page (" + document.title + ") - take over");

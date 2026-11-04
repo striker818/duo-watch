@@ -5,7 +5,7 @@
                                                       earliest time, contact, Apple Card - stops at Review
   checkout.py --no-bag <buy url>                       pre-fill only (used by duo_watch.py --test-alert)
   checkout.py --test                                   dry run with a 20W adapter; also stops at Review
-  checkout.py --test-phone                             dry run with an iPhone 18 Pro on Apple Card + T-Mobile, the
+  checkout.py --test-phone                             dry run with any in-stock iPhone 18 Pro on Apple Card + T-Mobile, the
                                                       same steps as the Duo; stops at Review
 
 Whenever a step needs you (T-Mobile PIN and picture code, Apple sign-in, card or carrier details, a page it doesn't know) it alerts you on the Mac
@@ -222,19 +222,44 @@ end tell''')   # fine as long as one window's profile allows it; checkout opens 
         return f"Chrome check failed: {e}"
 
 
-def test_store(part="MWVV3AM/A"):
-    """Nearest store in DUO_US_STATE with the 20W adapter for pickup, for --test."""
-    req = urllib.request.Request(w.URL.split("?")[0] + f"?parts.0={part}&location={w.ZIP}",
+# iPhone 18 Pro part -> buy-page token; the part is the same for every carrier (the carrier goes in the link)
+PRO_18 = {
+    "MJQ34LL/A": "6.3-inch-display-256gb-black", "MJQ44LL/A": "6.3-inch-display-256gb-silver",
+    "MJQ54LL/A": "6.3-inch-display-256gb-burgundy", "MJQ64LL/A": "6.3-inch-display-256gb-glacier",
+    "MJQ74LL/A": "6.3-inch-display-512gb-black", "MJQ84LL/A": "6.3-inch-display-512gb-silver",
+    "MJQ94LL/A": "6.3-inch-display-512gb-burgundy", "MJQA4LL/A": "6.3-inch-display-512gb-glacier",
+    "MJQC4LL/A": "6.3-inch-display-1tb-black", "MJQD4LL/A": "6.3-inch-display-1tb-silver",
+    "MJQE4LL/A": "6.3-inch-display-1tb-burgundy", "MJQF4LL/A": "6.3-inch-display-1tb-glacier",
+    "MJQG4LL/A": "6.3-inch-display-2tb-black", "MJQH4LL/A": "6.3-inch-display-2tb-silver",
+    "MJQJ4LL/A": "6.3-inch-display-2tb-burgundy", "MJQK4LL/A": "6.3-inch-display-2tb-glacier",
+    "MJW44LL/A": "6.9-inch-display-256gb-black", "MJW54LL/A": "6.9-inch-display-256gb-silver",
+    "MJW64LL/A": "6.9-inch-display-256gb-burgundy", "MJW74LL/A": "6.9-inch-display-256gb-glacier",
+    "MJW84LL/A": "6.9-inch-display-512gb-black", "MJW94LL/A": "6.9-inch-display-512gb-silver",
+    "MJWA4LL/A": "6.9-inch-display-512gb-burgundy", "MJWC4LL/A": "6.9-inch-display-512gb-glacier",
+    "MJWD4LL/A": "6.9-inch-display-1tb-black", "MJWE4LL/A": "6.9-inch-display-1tb-silver",
+    "MJWF4LL/A": "6.9-inch-display-1tb-burgundy", "MJWG4LL/A": "6.9-inch-display-1tb-glacier",
+    "MJWH4LL/A": "6.9-inch-display-2tb-black", "MJWJ4LL/A": "6.9-inch-display-2tb-silver",
+    "MJWK4LL/A": "6.9-inch-display-2tb-burgundy", "MJWL4LL/A": "6.9-inch-display-2tb-glacier",
+}
+
+
+def test_store(parts=("MWVV3AM/A",)):
+    """First of `parts` (in order) with pickup at a store in DUO_US_STATE, nearest store first: (part, store, name).
+    One request for all of them, so a dry run costs the watcher's rate limit as little as possible."""
+    req = urllib.request.Request(w.URL.split("?")[0] + "?" + "&".join(f"parts.{i}={p}" for i, p in enumerate(parts))
+                                 + f"&location={w.ZIP}",
                                  headers={"User-Agent": "Mozilla/5.0 (Macintosh) Safari/605.1.15", "Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             stores = json.load(r)["body"].get("stores", [])
     except Exception as e:
         print(f"store lookup failed ({e}) - the dry run will ask you to pick the store")
-        return "", ""
-    s = next((s for s in stores if s.get("state") == w.US_STATE
-              and s.get("partsAvailability", {}).get(part, {}).get("pickupDisplay") == "available"), {})
-    return s.get("storeNumber", ""), s.get("storeName", "")
+        return parts[0], "", ""
+    for p in parts:
+        for s in stores:
+            if s.get("state") == w.US_STATE and s.get("partsAvailability", {}).get(p, {}).get("pickupDisplay") == "available":
+                return p, s.get("storeNumber", ""), s.get("storeName", "")
+    return parts[0], "", ""
 
 
 if __name__ == "__main__":
@@ -242,12 +267,14 @@ if __name__ == "__main__":
     if a and a[0] == "--preflight":
         print(preflight() or "Chrome is ready for checkout")
     elif a and a[0] == "--test-phone":
-        store, name = test_store("MJQ44LL/A")   # iPhone 18 Pro 6.3" 256GB Silver, T-Mobile: same page flow as the Duo
-        print(f"Dry run with an iPhone 18 Pro (Apple Card Monthly, T-Mobile), pickup at {name or '(no store found - it will ask you)'}. Stops at Review.")
-        drive("https://www.apple.com/shop/buy-iphone/iphone-18-pro/6.3-inch-display-256gb-silver-t-mobile?purchaseOption=bfi&cppart=TMOBILE_IPHONE18PRO",
+        # any iPhone 18 Pro with pickup nearby, on T-Mobile: same page flow as the Duo
+        part, store, name = test_store(tuple(PRO_18))
+        print(f"Dry run with an iPhone 18 Pro {PRO_18[part]} (Apple Card Monthly, T-Mobile), "
+              f"pickup at {name or '(no store found - it will ask you)'}. Stops at Review.")
+        drive(f"https://www.apple.com/shop/buy-iphone/iphone-18-pro/{PRO_18[part]}-t-mobile?purchaseOption=bfi&cppart=TMOBILE_IPHONE18PRO",
               store, name, test=True)
     elif a and a[0] == "--test":
-        store, name = test_store()
+        _, store, name = test_store()
         print(f"Dry run with a 20W adapter, pickup at {name or '(no store found - it will ask you)'}. Stops at Review.")
         drive("https://www.apple.com/shop/product/mwvv3am/a/20w-usb-c-power-adapter", store, name, test=True)
     elif a and a[0] == "--no-bag":
