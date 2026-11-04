@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""iPhone Duo stock agent - checks Apple Store pickup near you, alerts you, opens checkout.
+"""iPhone Duo stock agent - checks Apple Store pickup near you, alerts you, and on the Mac drives checkout
+(checkout.py) up to the point it needs you.
 Config: iPhone Duo (T-Mobile, no AppleCare, Apple Card Monthly Installments) Star White 256GB (MK1E4LL/A) + 512GB (MK1G4LL/A), pickup near DUO_ZIP.
 """
 import json, os, smtplib, subprocess, sys, time, urllib.request
@@ -61,10 +62,33 @@ def check():
             p = s.get("partsAvailability", {}).get(part, {})
             if p.get("pickupDisplay") == "available" and s.get("state") == US_STATE:
                 hits.append((label, url, f'{label} @ {s.get("storeName")} ({s.get("city")}, {dist:.0f} mi) - {p.get("pickupSearchQuote", "")}',
-                             s.get("storeNumber", "")))
+                             s.get("storeNumber", ""), s.get("storeName", "")))
     return hits, len(stores)
 
+CHECKOUT_PID = Path.home() / ".duo_checkout.pid"
+
+def start_checkout(hits, add_to_bag=True):
+    """Start checkout.py in the background on one hit: today's pickup first, then 256GB before 512GB.
+    Skips if a checkout from the last 20 minutes is still running, so the bag only ever gets one phone."""
+    if CHECKOUT_PID.exists() and time.time() - CHECKOUT_PID.stat().st_mtime < 20 * 60:
+        try:
+            os.kill(int(CHECKOUT_PID.read_text()), 0)
+            return log("checkout already running - not starting another")
+        except (OSError, ValueError):
+            pass
+    order = list(PARTS)
+    label, url, _, store, name = min(hits, key=lambda h: ("Today" not in h[2], order.index(
+        next(p for p, (l, _) in PARTS.items() if l == h[0]))))
+    args = [url, store, name] if add_to_bag else ["--no-bag", url]
+    proc = subprocess.Popen([sys.executable, str(Path(__file__).with_name("checkout.py")), *args],
+                            stdout=subprocess.DEVNULL, stderr=open(Path.home() / "duo_checkout.err", "a"),
+                            start_new_session=True)
+    CHECKOUT_PID.write_text(str(proc.pid))
+    log(f"checkout started for {label} @ {name} (pid {proc.pid})")
+
 def notify(hits, add_to_bag=True):
+    if MAC:  # first, every second counts: Chrome starts on the buy page while the alerts go out
+        start_checkout(hits, add_to_bag)
     urls = list(dict.fromkeys(u for _, u, *_ in hits))
     BUY_URL = urls[0]
     body = ("iPhone Duo IN STOCK for pickup:\n" + "\n".join(h[2] for h in hits)
@@ -73,15 +97,13 @@ def notify(hits, add_to_bag=True):
     if MAC:
         # Mac popup + sound
         subprocess.run(["osascript", "-e", f'display notification "{hits[0][2]}" with title "iPhone Duo in stock!" sound name "Glass"'])
-        # open checkout page(s) in Chrome so they're ready to tap
-        for u in urls:
-            subprocess.run(["open", "-a", "Google Chrome", u])
     if NTFY_TOPIC:
         # phone push: title says size + store, plus one button per in-stock size. Links use x-safari-https:// (iOS 17+)
         # so they open in Safari: faster than the Apple Store app, and Safari keeps the Apple Card + T-Mobile presets
         first = hits[0][2].split(" (")[0].replace(" Star White T-Mobile", "")       # "512GB @ Mall of America"
         phone_body = ("\n".join(h[2].split(" - ")[0] for h in hits)
-                      + "\nOpens Safari with Apple Card Monthly + T-Mobile set. Tap No AppleCare > Add to Bag > Pickup at that store")
+                      + ("\nAt the Mac? It's checking out in Chrome - sign in when asked, then Place Order." if MAC else "")
+                      + "\nOn phone: opens Safari with Apple Card Monthly + T-Mobile set. Tap No AppleCare > Add to Bag > Pickup at that store")
         actions = "; ".join(f"view, Buy {lbl.split()[0]}, x-safari-{u}, clear=true"
                             for lbl, u in PARTS.values() if u in urls)
         try:
@@ -100,42 +122,6 @@ def notify(hits, add_to_bag=True):
                 s.login(GMAIL_USER, GMAIL_APP_PW); s.send_message(m)
         except Exception as e:
             log(f"email failed: {e}")
-    if MAC:  # last, since it waits on the page; pre-fill one tab only (256GB first) so the bag gets one phone
-        prefill(next(u for _, u in PARTS.values() if u in urls), add_to_bag)
-
-PREFILL_AS = '''on run argv
-  set u to item 1 of argv
-  tell application "Google Chrome"
-    repeat 60 times
-      set found to missing value
-      try -- tabs can open/close while we scan; just rescan next round
-        repeat with w in windows
-          repeat with t in tabs of w
-            if URL of t starts with u and not (loading of t) then set found to contents of t
-          end repeat
-        end repeat
-      end try
-      if found is not missing value then
-        execute found javascript (item 2 of argv)
-        set s to ""
-        repeat 40 times
-          delay 1
-          set s to execute found javascript "window.__duoPrefill || ''"
-          if s starts with "ready" or s starts with "adding" or s starts with "stopped" then return s
-        end repeat
-        return "no result: " & s
-      end if
-      delay 0.5
-    end repeat
-  end tell
-  return "tab never finished loading"
-end run'''
-
-def prefill(url, add_to_bag=True):
-    """Pick Finance > Apple Card Monthly Installments, T-Mobile, No AppleCare (and Add to Bag) in the open Chrome tab."""
-    js = ("" if add_to_bag else "window.__duoNoBag = true;\n") + Path(__file__).with_name("prefill.js").read_text()
-    r = subprocess.run(["osascript", "-e", PREFILL_AS, url, js], capture_output=True, text=True, timeout=120)
-    log(f"prefill: {(r.stdout or r.stderr).strip()}")
 
 def track(hits):
     """Record how long each size stays in stock at each store. Times are only as precise as the 60s polling."""
@@ -192,15 +178,26 @@ def main():
 
 if __name__ == "__main__":
     if "--test-alert" in sys.argv:
-        lbl, url = PARTS["MK1G4LL/A"]; notify([(lbl, url, f"TEST - {lbl} @ Rosedale (Roseville, 5 mi)", "R022")], add_to_bag=False); sys.exit()
+        lbl, url = PARTS["MK1G4LL/A"]; notify([(lbl, url, f"TEST - {lbl} @ Rosedale (Roseville, 5 mi)", "R022", "Rosedale")], add_to_bag=False); sys.exit()
     if "--history" in sys.argv:
         history(); sys.exit()
-    if "--test-prefill" in sys.argv:  # opens the 256GB page and pre-fills it, stopping before Add to Bag
-        url = PARTS["MK1E4LL/A"][1]; subprocess.run(["open", "-a", "Google Chrome", url]); prefill(url, add_to_bag=False); sys.exit()
+    if "--test-checkout" in sys.argv:  # dry run of the whole checkout with a 20W adapter, stops at Review
+        subprocess.run([sys.executable, str(Path(__file__).with_name("checkout.py")), "--test"]); sys.exit()
     if "--loop" in sys.argv:  # --loop N: check whenever the clock is N seconds into each PERIOD-second slot
         offset = int(sys.argv[sys.argv.index("--loop") + 1])
+        checked = 0
         while True:
             time.sleep((offset - time.time()) % PERIOD or PERIOD)
+            if MAC and time.time() - checked > 3 * 3600:  # Chrome updates can switch Apple Events JS back off
+                checked = time.time()
+                try:
+                    import checkout
+                    problem = checkout.preflight()
+                except Exception as e:
+                    problem = f"Chrome check failed: {e}"
+                if problem:
+                    log("preflight: " + problem)
+                    subprocess.run(["osascript", "-e", 'on run argv\ndisplay notification (item 1 of argv) with title "Duo watcher can\'t check out" sound name "Basso"\nend run', problem])
             try:
                 main()
             except Exception as e:

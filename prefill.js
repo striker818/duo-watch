@@ -1,5 +1,5 @@
-// Pre-fills the iPhone Duo buy page: Finance -> Apple Card Monthly Installments -> T-Mobile -> No AppleCare -> Add to Bag.
-// Never checks out. Run inside the buy page (duo_watch.py injects it into Chrome via AppleScript).
+// Pre-fills the iPhone Duo buy page: No trade-in -> Finance -> Apple Card Monthly Installments -> T-Mobile -> No AppleCare -> Continue (to T-Mobile) or Add to Bag.
+// Never checks out. checkout.py injects it into the buy page in Chrome via AppleScript, then takes over after Add to Bag.
 // Progress/result is left in window.__duoPrefill and shown in a banner at the top of the page.
 (async () => {
   const ADD_TO_BAG = !window.__duoNoBag;      // set window.__duoNoBag = true first to stop before Add to Bag
@@ -13,8 +13,8 @@
   const shown = sel => [...document.querySelectorAll(sel)].find(e => e.offsetParent || (e.labels && e.labels[0] && e.labels[0].offsetParent));
   async function pick(sel, name) {
     for (let i = 0; i < 40; i++) {                 // ~20s: later sections stay disabled until earlier ones are answered
+      if ([...document.querySelectorAll(sel)].some(e => e.checked)) return;   // already chosen, even if its section is collapsed
       const el = shown(sel);
-      if (el && el.checked) return;
       if (el && !el.disabled) {
         ((el.labels && el.labels[0]) || el).click(); await sleep(400);
         if (el.checked) return;
@@ -27,6 +27,14 @@
   const summary = () => document.querySelector("[data-autom=purchaseoption-edit-link]");
 
   try {
+    // wait for the page to finish drawing its option cards, or the checks below see a half-built page
+    for (let i = 0; i < 20 && !document.querySelector("input[name=carrierModel]"); i++) await sleep(500);
+    await sleep(500);
+    // payment stays disabled until trade-in is answered; pick No trade-in unless something is already chosen
+    if (document.querySelector("input[name=tradeupinline]") && !document.querySelector("input[name=tradeupinline]:checked")) {
+      status("choosing No trade-in...");
+      await pick("input[name=tradeupinline][value=noTradeIn]", "No trade-in");
+    }
     status("choosing Finance...");
     // the page remembers earlier choices; reopen the payment section unless it already says Apple Card
     if (summary() && !/Apple Card Monthly/i.test(summary().closest("div").parentElement.textContent)) { summary().click(); await sleep(800); }
@@ -37,15 +45,20 @@
       await sleep(2000);                            // payment section collapses, then carriers re-enable
     }
     status("choosing T-Mobile...");                 // choosing Finance clears the carrier
-    await pick("input[name=carrierModel][value=TMOBILE_IPHONEDUO]", "T-Mobile");
+    await pick("input[name=carrierModel][value^=TMOBILE_]", "T-Mobile");  // TMOBILE_IPHONEDUO, TMOBILE_IPHONE17...
     status("choosing No AppleCare...");
     await pick("input[data-autom=noapplecare]", "No AppleCare");
-    const bag = document.querySelector("button[data-autom=add-to-cart]");
-    for (let i = 0; i < 20 && bag && bag.disabled; i++) await sleep(500);
-    if (!ADD_TO_BAG) return status("ready - Apple Card, T-Mobile, no AppleCare selected (stopped before Add to Bag)", "#248a3d");
-    if (!bag || bag.disabled) throw new Error("Add to Bag is not enabled");
-    status("adding to bag - then choose Pickup at the store from the alert and check out yourself", "#248a3d");
-    bag.click();
+    // carrier iPhones show Continue (to the T-Mobile account check) instead of Add to Bag until the carrier is verified
+    let bag, proceed;
+    for (let i = 0; i < 20; i++) {
+      bag = shown("button[data-autom=add-to-cart]"); proceed = shown("button[data-autom=proceed]");
+      if ((bag && !bag.disabled) || (proceed && !proceed.disabled)) break;
+      await sleep(500);
+    }
+    if (!ADD_TO_BAG) return status("ready - Apple Card, T-Mobile, no AppleCare selected (stopped before " + (bag ? "Add to Bag" : "Continue") + ")", "#248a3d");
+    if (bag && !bag.disabled) { status("adding to bag - checkout continues on its own", "#248a3d"); bag.click(); }
+    else if (proceed && !proceed.disabled) { status("continuing to T-Mobile", "#248a3d"); proceed.click(); }
+    else throw new Error("neither Add to Bag nor Continue is enabled");
   } catch (e) {
     status("stopped: " + e.message + " - finish the choices by hand", "#d70015");
   }
