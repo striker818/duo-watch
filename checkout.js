@@ -53,7 +53,15 @@
     if (!b) return say(step + ": looking for Continue");
     if (/place|order|submit|pay now/i.test(text(b))) return say("DONE review the order and tap Place Your Order yourself");
     if (b.disabled || b.getAttribute("aria-disabled") === "true") return say(step + ": waiting for Continue to enable");
-    if (act("next_" + step, () => b.click())) return say(step + ": clicked " + text(b));
+    // a form that just appeared can swallow the first Continue (seen on pickup contact: Apple spent ~9s, then stayed on
+    // the page and needed a second click), so let each step settle for a moment first
+    const k = "__duoSeen_" + step;
+    if (!window[k]) window[k] = Date.now();
+    if (Date.now() - window[k] < 500) return say(step + ": letting the form settle");
+    // clicking again on the same step: note what the page complained about, to fix next time
+    const again = window["__duoAct_next_" + step];
+    const errs = again ? vis("[role=alert], .form-message-error, [class*=error-message], [class*=errorMessage]").map(text).filter(Boolean).slice(0, 2).join(" / ") : "";
+    if (act("next_" + step, () => b.click())) return say(step + ": clicked " + text(b) + (again ? " again" + (errs ? " (page said: " + errs + ")" : "") : ""));
     return say(step + ": continuing...");
   }
 
@@ -161,9 +169,17 @@
     return b && !b.disabled && act("bag", () => b.click()) ? say("clicked Add to Bag") : say("adding to bag...");
   }
   if (/\/shop\/bag/.test(url)) {
-    if (/bag is empty/i.test(document.body.innerText)) return say("WAIT the bag is empty - nothing got added");
+    if (/bag is empty/i.test(document.body.innerText)) {
+      // started from the ready cart but it's gone (Apple cleared it): fall back to the buy page
+      if (DUO.buyUrl && act("tobuy", () => { location.href = DUO.buyUrl; }, 8000)) return say("the ready cart was empty - opening the buy page");
+      return say("WAIT the bag is empty - nothing got added");
+    }
+    const removes = vis("button[data-autom=bag-item-remove-button]");
+    // a different size than the ready cart's is in stock: take the ready-cart phone out so only the in-stock one is ordered
+    const drop = removes.length > 1 && DUO.dropItem && removes.find(b => text(b).includes(DUO.dropItem));
+    if (drop) return act("drop", () => drop.click(), 3000) ? say("removed " + DUO.dropItem + " from the bag (not the size in stock)") : say("removing the other size...");
     // leftovers in the bag would go into the same order; let you decide rather than check out with them
-    const items = vis("button[data-autom=bag-item-remove-button]").length;
+    const items = removes.length;
     if (items > 1) return say("WAIT the bag has " + items + " items - remove all but the phone, then I'll check out");
     // with Apple Card Monthly the button is bag-checkout-button, and the first click opens an Apple Card pop-up that
     // has its own copy of it; click the pop-up's one when it's open, or we just keep reopening the pop-up

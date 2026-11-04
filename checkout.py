@@ -216,7 +216,10 @@ def alert(tab, status, test):
 
 def drive(url, store="", store_name="", add_to_bag=True, test=False):
     args = {'store': store, 'storeName': store_name, 'zip': w.ZIP, 'phone': os.environ.get('DUO_TMOBILE_NUMBER', ''),
-            'pickup': {k: os.environ.get('DUO_PICKUP_' + k.upper(), '') for k in ('first', 'last', 'email', 'phone')}}
+            'pickup': {k: os.environ.get('DUO_PICKUP_' + k.upper(), '') for k in ('first', 'last', 'email', 'phone')},
+            # ready cart (see duo_watch.start_checkout): where to go if the bag turns out empty, and which bag item to
+            # take out when a different size is the one in stock
+            'buyUrl': os.environ.get('DUO_BUY_URL', ''), 'dropItem': os.environ.get('DUO_DROP_ITEM', '')}
     # Install checkout.js as a loop inside the page (re-installed after each page load, since navigation clears it).
     # Each Python tick then only reads window.__duoStatus, so steps follow each other in ~150ms, not ~600ms.
     step_src = (HERE / "checkout.js").read_text().rstrip().rstrip(";")
@@ -382,6 +385,11 @@ if __name__ == "__main__":
         _, store, name = test_store()
         print(f"Dry run with a 20W adapter, pickup at {name or '(no store found - it will ask you)'}. Stops at Review.")
         drive("https://www.apple.com/shop/product/mwvv3am/a/20w-usb-c-power-adapter", store, name, test=True)
+    elif a and a[0] == "--test-bag":
+        # dry run of the ready-cart route: start at the bag (an in-stock 18 Pro already in it), pickup where it's in stock
+        part, store, name = test_store(tuple(PRO_18))
+        print(f"Dry run from the bag, pickup at {name or '(no store found - it will ask you)'}. Stops at Review.")
+        drive("https://www.apple.com/shop/bag", store, name, test=True)
     elif a and a[0] == "--no-bag":
         drive(a[1], add_to_bag=False, test=True)
     elif a:
