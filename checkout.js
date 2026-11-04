@@ -109,7 +109,14 @@
 
   if (!/^https?:/.test(url)) return "page loading...";   // Safari's new window is about:blank for a moment
   if (/\/shop\/404/.test(url)) return say("WAIT Apple showed a 404 - open apple.com/shop/bag and check out by hand");
-  if (placeOrder()) return say("DONE review the order and tap Place Your Order yourself");
+  if (placeOrder()) {
+    // Review: tick the carrier's Terms & Conditions box(es) so the order is ready; Place Your Order stays yours
+    const terms = [...document.querySelectorAll("input[type=checkbox]")]
+      .filter(c => !c.checked && !c.disabled && (seen(c) || seen(labelOf(c))) && /terms/i.test(c.id + " " + text(labelOf(c))));
+    if (terms.length)
+      return act("terms", () => labelOf(terms[0]).click(), 2000) ? say("accepted: " + text(labelOf(terms[0]))) : say("accepting terms...");
+    return say("DONE review the order and tap Place Your Order yourself");
+  }
   if (/\/shop\/signIn/i.test(url) || /^idmsa\./.test(location.hostname)) return say(  // idmsa: Apple Card checkout sign-in
     "WAIT sign in to your Apple Account - I'll carry on after that");
   if (/^preauth/.test(location.hostname)) {  // "Let's connect this new iPhone to T-Mobile": number, PIN, picture code
