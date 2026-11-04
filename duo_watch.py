@@ -168,19 +168,21 @@ def main():
         if getattr(e, "code", None) == 541:
             BLOCKED.touch(); log(f"blocked by Apple (HTTP 541) - pausing checks for {BACKOFF // 60} min"); return
         log(f"check error: {e}"); return
+    track(hits)   # first, so a failing alert or checkout can't lose the drop record
     prev = json.loads(STATE.read_text()) if STATE.exists() else []
     if hits and [h[2] for h in hits] != prev:
         log("IN STOCK: " + " | ".join(h[2] for h in hits)); notify(hits)
     elif not hits:
         log(f"no stock ({n} stores checked)")
     STATE.write_text(json.dumps([h[2] for h in hits]))
-    track(hits)
 
 if __name__ == "__main__":
     if "--test-alert" in sys.argv:
         lbl, url = PARTS["MK1G4LL/A"]; notify([(lbl, url, f"TEST - {lbl} @ Rosedale (Roseville, 5 mi)", "R022", "Rosedale")], add_to_bag=False); sys.exit()
     if "--history" in sys.argv:
         history(); sys.exit()
+    if "--drops" in sys.argv:  # when drops happen, by hour and weekday (cloud + Mac records merged)
+        subprocess.run([sys.executable, str(Path(__file__).with_name("drops.py"))]); sys.exit()
     if "--test-checkout" in sys.argv:  # dry run of the whole checkout with a 20W adapter, stops at Review
         subprocess.run([sys.executable, str(Path(__file__).with_name("checkout.py")), "--test"]); sys.exit()
     if "--loop" in sys.argv:  # --loop N: check whenever the clock is N seconds into each PERIOD-second slot
