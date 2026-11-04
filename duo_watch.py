@@ -70,7 +70,7 @@ CHECKOUT_PID = Path.home() / ".duo_checkout.pid"
 # Ready cart: this part (e.g. MK1E4LL/A) sits in the Safari bag ahead of time with Apple Card + T-Mobile + no AppleCare
 # (Apple lets it in while pickup is sold out). When it's the one in stock, checkout starts at the bag and skips the buy
 # page, the option picking and Add to Bag - the step Apple sometimes answers with a 404 at drop time.
-READY_CART = os.environ.get("DUO_READY_CART", "")
+READY_CART = [p.strip() for p in os.environ.get("DUO_READY_CART", "").split(",") if p.strip() in PARTS]  # one or both sizes
 BAG_URL = "https://www.apple.com/shop/bag"
 _checkout_lock = threading.Lock()   # the cloud listener and the Mac's own check can both start one
 
@@ -90,13 +90,16 @@ def _start_checkout(hits, add_to_bag):
     order = list(PARTS)
     part_of = lambda h: next(p for p, (l, _) in PARTS.items() if l == h[0])
     # the ready cart's size first (fastest), then today's pickup, then 256GB before 512GB
-    label, url, _, store, name = h = min(hits, key=lambda h: (part_of(h) != READY_CART, "Today" not in h[2], order.index(part_of(h))))
+    label, url, _, store, name = h = min(hits, key=lambda h: (part_of(h) not in READY_CART, "Today" not in h[2], order.index(part_of(h))))
     env = dict(os.environ)
-    if add_to_bag and READY_CART in PARTS:
-        if part_of(h) == READY_CART:
+    if add_to_bag and READY_CART:
+        if part_of(h) in READY_CART:
             env["DUO_BUY_URL"] = url; url = BAG_URL
-        else:  # "iPhone Duo 256GB Star White", as the bag names it
-            env["DUO_DROP_ITEM"] = "iPhone Duo " + PARTS[READY_CART][0].replace(" T-Mobile", "")
+        # the other ready-cart sizes come out of the bag, so only the in-stock one is ordered
+        # ("iPhone Duo 256GB Star White", as the bag names it)
+        others = ["iPhone Duo " + PARTS[p][0].replace(" T-Mobile", "") for p in READY_CART if p != part_of(h)]
+        if others:
+            env["DUO_DROP_ITEM"] = "|".join(others)
     args = [url, store, name] if add_to_bag else ["--no-bag", url]
     proc = subprocess.Popen([sys.executable, str(Path(__file__).with_name("checkout.py")), *args], env=env,
                             stdout=subprocess.DEVNULL, stderr=open(Path.home() / "duo_checkout.err", "a"),

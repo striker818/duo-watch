@@ -176,8 +176,10 @@
     }
     const removes = vis("button[data-autom=bag-item-remove-button]");
     // a different size than the ready cart's is in stock: take the ready-cart phone out so only the in-stock one is ordered
-    const drop = removes.length > 1 && DUO.dropItem && removes.find(b => text(b).includes(DUO.dropItem));
-    if (drop) return act("drop", () => drop.click(), 3000) ? say("removed " + DUO.dropItem + " from the bag (not the size in stock)") : say("removing the other size...");
+    const drops = (DUO.dropItem || "").split("|").filter(Boolean);
+    // (even if it's the only item: then the bag empties and we fall back to the in-stock size's buy page)
+    const drop = removes.find(b => drops.some(d => text(b).includes(d)));
+    if (drop) return act("drop", () => drop.click(), 3000) ? say("removed " + text(drop).replace(/^Remove/, "") + " from the bag (not the size in stock)") : say("removing the other size...");
     // leftovers in the bag would go into the same order; let you decide rather than check out with them
     const items = removes.length;
     if (items > 1) return say("WAIT the bag has " + items + " items - remove all but the phone, then I'll check out");
