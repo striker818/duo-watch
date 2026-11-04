@@ -11,8 +11,9 @@
 
   // the radios are visually hidden; find the one whose card (label) is on screen
   const shown = sel => [...document.querySelectorAll(sel)].find(e => e.offsetParent || (e.labels && e.labels[0] && e.labels[0].offsetParent));
-  async function pick(sel, name) {
+  async function pick(sel, name, done) {           // done(): another sign it's already chosen (e.g. a collapsed summary)
     for (let i = 0; i < 40; i++) {                 // ~20s: later sections stay disabled until earlier ones are answered
+      if (done && done()) return;
       if ([...document.querySelectorAll(sel)].some(e => e.checked)) return;   // already chosen, even if its section is collapsed
       const el = shown(sel);
       if (el && !el.disabled) {
@@ -25,6 +26,7 @@
     throw new Error("could not select " + name);
   }
   const summary = () => document.querySelector("[data-autom=purchaseoption-edit-link]");
+  const acmiChosen = () => !!summary() && /Apple Card Monthly/i.test(summary().closest("div").parentElement.textContent);
 
   try {
     // wait for the page to finish drawing its option cards, or the checks below see a half-built page
@@ -37,11 +39,12 @@
     }
     status("choosing Finance...");
     // the page remembers earlier choices; reopen the payment section unless it already says Apple Card
-    if (summary() && !/Apple Card Monthly/i.test(summary().closest("div").parentElement.textContent)) { summary().click(); await sleep(800); }
-    if (!(summary() && /Apple Card Monthly/i.test(summary().closest("div").parentElement.textContent))) {
+    if (summary() && !acmiChosen()) { summary().click(); await sleep(800); }
+    if (!acmiChosen()) {
       await pick("input[name=purchase_option_group][value=finance]", "Finance");
       status("choosing Apple Card Monthly Installments...");
-      await pick("input[data-autom=purchaseOptionbfi]", "Apple Card Monthly Installments");
+      // the link often preselects it, and the section collapses to a summary before we get here
+      await pick("input[data-autom=purchaseOptionbfi]", "Apple Card Monthly Installments", acmiChosen);
       await sleep(2000);                            // payment section collapses, then carriers re-enable
     }
     status("choosing T-Mobile...");                 // choosing Finance clears the carrier
@@ -51,6 +54,11 @@
     // carrier iPhones show Continue (to the T-Mobile account check) instead of Add to Bag until the carrier is verified
     let bag, proceed;
     for (let i = 0; i < 20; i++) {
+      // the AppleCare section can redraw after our click (seen in Safari) and drop the choice; pick it again
+      if (!document.querySelector("input[name=applecare-options]:checked")) {
+        const ac = shown("input[data-autom=noapplecare]");
+        if (ac && !ac.disabled) ((ac.labels && ac.labels[0]) || ac).click();
+      }
       bag = shown("button[data-autom=add-to-cart]"); proceed = shown("button[data-autom=proceed]");
       if ((bag && !bag.disabled) || (proceed && !proceed.disabled)) break;
       await sleep(500);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drives Apple's checkout in Chrome as far as it can, then hands over to you. duo_watch.py starts it on a hit.
+"""Drives Apple's checkout in Safari or Chrome (DUO_BROWSER) as far as it can, then hands over to you. duo_watch.py starts it on a hit.
 
   checkout.py <buy url> [store number] [store name]   pre-fill, Add to Bag, Check Out, Pickup at the store,
                                                       earliest time, contact, Apple Card - stops at Review
@@ -10,7 +10,8 @@
 
 Whenever a step needs you (T-Mobile PIN and picture code, Apple sign-in, card or carrier details, a page it doesn't know) it alerts you on the Mac
 and phone, waits, and carries on once you've done it. It never places the order: Place Your Order is always yours.
-Needs Chrome > View > Developer > Allow JavaScript from Apple Events.
+Needs Allow JavaScript from Apple Events: Safari > Develop menu (turn on Settings > Advanced > Show features for web
+developers first), or Chrome > View > Developer.
 """
 import json, os, subprocess, sys, time, urllib.request
 from pathlib import Path
@@ -82,6 +83,56 @@ FRONT = '''on run argv
   end tell
 end run'''
 
+# Safari: checkout gets its own window, so "current tab of window id N" always means our tab and the id never shifts
+SAFARI = os.environ.get("DUO_BROWSER", "chrome").strip().lower() == "safari"
+BROWSER = "Safari" if SAFARI else "Chrome"
+SETTING = ("Safari > Develop > Allow JavaScript from Apple Events" if SAFARI
+           else "Chrome > View > Developer > Allow JavaScript from Apple Events")
+
+# the new window isn't always front right away (another window can be), so return the id that wasn't there before
+SAFARI_OPEN = '''on run argv
+  tell application "Safari"
+    activate
+    set oldIds to id of every window
+    make new document with properties {URL:item 1 of argv}
+    repeat 40 times
+      set newIds to id of every window   -- fetch the list first; iterating "id of every window" directly fails
+      repeat with i from 1 to count of newIds
+        if oldIds does not contain (item i of newIds) then return (item i of newIds)
+      end repeat
+      delay 0.1
+    end repeat
+  end tell
+  error "Safari never opened the checkout window"
+end run'''
+
+SAFARI_JS = '''on run argv
+  tell application "Safari"
+    try
+      set t to current tab of window id ((item 1 of argv) as integer)
+    on error
+      return "__notab__"
+    end try
+    set state to do JavaScript "document.readyState" in t
+    if state is missing value or state is "loading" then return "__loading__"
+    try
+      set r to do JavaScript (item 2 of argv) in t
+      if r is missing value then return ""
+      return r as text
+    on error msg number n
+      if n is -2753 then return ""   -- script returned nothing: Safari leaves r undefined
+      error msg number n
+    end try
+  end tell
+end run'''
+
+SAFARI_FRONT = '''on run argv
+  tell application "Safari"
+    activate
+    set index of window id ((item 1 of argv) as integer) to 1
+  end tell
+end run'''
+
 NOTIFY = 'on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv) sound name (item 3 of argv)\nend run'
 
 
@@ -94,7 +145,7 @@ def osa(script, *args, timeout=15):
 
 def js(tab, code):
     try:
-        return osa(RUN_JS, tab, code)
+        return osa(SAFARI_JS if SAFARI else RUN_JS, tab, code)
     except subprocess.TimeoutExpired:
         return "__loading__"
     except RuntimeError as e:
@@ -114,9 +165,15 @@ FIND_TAB = '''on run argv
 end run'''
 
 
+def front(tab):
+    osa(SAFARI_FRONT if SAFARI else FRONT, tab)
+
+
 def open_tab(url):
-    """Open url in the Chrome profile named by DUO_CHROME_PROFILE (e.g. "Profile 11"): each profile has its own Apple
+    """Safari: open url in a new window of its own. Chrome: open url in the Chrome profile named by DUO_CHROME_PROFILE (e.g. "Profile 11"): each profile has its own Apple
     sign-in and bag, so checkout must always land in the same one. Without it, use the first window that allows JS."""
+    if SAFARI:
+        return osa(SAFARI_OPEN, url)
     profile = os.environ.get("DUO_CHROME_PROFILE", "")
     if not profile:
         return osa(OPEN_TAB, url)
@@ -128,7 +185,7 @@ def open_tab(url):
         except RuntimeError:   # "Connection is invalid" while the helper Chrome that open -n starts hands over and quits
             tab = ""
         if tab:
-            osa(FRONT, tab)
+            front(tab)
             return tab
         time.sleep(0.25)
     raise RuntimeError(f"Chrome never opened the tab in {profile}")
@@ -139,7 +196,7 @@ def alert(tab, status, test):
     msg = status.split(" ", 1)[1]
     title = ("Duo: ready to place order" if done else "Duo checkout needs you") + (" [test]" if test else "")
     try:
-        osa(FRONT, tab)
+        front(tab)
         osa(NOTIFY, title, msg, "Hero" if done else "Glass")
     except Exception as e:
         w.log(f"checkout: Mac alert failed: {e}")
@@ -153,10 +210,12 @@ def alert(tab, status, test):
 
 
 def drive(url, store="", store_name="", add_to_bag=True, test=False):
-    step_js = f"var DUO = {json.dumps({'store': store, 'storeName': store_name, 'zip': w.ZIP, 'phone': os.environ.get('DUO_TMOBILE_NUMBER', '')})};\n" + (HERE / "checkout.js").read_text()
+    args = {'store': store, 'storeName': store_name, 'zip': w.ZIP, 'phone': os.environ.get('DUO_TMOBILE_NUMBER', ''),
+            'pickup': {k: os.environ.get('DUO_PICKUP_' + k.upper(), '') for k in ('first', 'last', 'email', 'phone')}}
+    step_js = f"var DUO = {json.dumps(args)};\n" + (HERE / "checkout.js").read_text()
     prefill_js = ("" if add_to_bag else "window.__duoNoBag = true;\n") + (HERE / "prefill.js").read_text()
     tab = open_tab(url)
-    w.log(f"checkout: driving tab {tab} for {store_name or url}")
+    w.log(f"checkout: driving {BROWSER} {'window' if SAFARI else 'tab'} {tab} for {store_name or url}")
     last_raw, same, logged, told, adding, carrier_runs = None, 0, None, None, None, 0
     end = time.time() + LIMIT
     while time.time() < end:
@@ -167,7 +226,7 @@ def drive(url, store="", store_name="", add_to_bag=True, test=False):
             time.sleep(TICK); continue
         if s.startswith("__error__"):
             if "Allow JavaScript from Apple Events" in s:
-                s = "WAIT turn on Chrome > View > Developer > Allow JavaScript from Apple Events, then finish by hand"
+                s = f"WAIT turn on {SETTING}, then finish by hand"
                 alert(tab, s, test); return w.log("checkout: " + s)
             w.log("checkout: " + s[:300]); time.sleep(1); continue
         if s == "NEED_PREFILL":
@@ -197,11 +256,24 @@ def drive(url, store="", store_name="", add_to_bag=True, test=False):
             if s.startswith("DONE"):
                 return
         time.sleep(TICK)
-    w.log("checkout: gave up after 20 min")
+    w.log(f"checkout: gave up after {LIMIT // 60} min")
 
 
 def preflight():
-    """Return a problem that would stop checkout from working, or "" if Chrome is ready."""
+    """Return a problem that would stop checkout from working, or "" if the browser is ready."""
+    if SAFARI:
+        try:
+            osa('''tell application "Safari"
+  if (count of documents) = 0 then return
+  do JavaScript "1" in front document
+end tell''')
+            return ""
+        except RuntimeError as e:
+            if "Allow JavaScript from Apple Events" in str(e):
+                return f"Safari blocks automation: turn on {SETTING}"
+            return f"Safari check failed: {e}"
+        except Exception as e:
+            return f"Safari check failed: {e}"
     try:
         osa('''tell application "Google Chrome"
   if (count of windows) = 0 then return
@@ -265,7 +337,7 @@ def test_store(parts=("MWVV3AM/A",)):
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a and a[0] == "--preflight":
-        print(preflight() or "Chrome is ready for checkout")
+        print(preflight() or f"{BROWSER} is ready for checkout")
     elif a and a[0] == "--test-phone":
         # any iPhone 18 Pro with pickup nearby, on T-Mobile: same page flow as the Duo
         part, store, name = test_store(tuple(PRO_18))

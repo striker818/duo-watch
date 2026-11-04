@@ -1,7 +1,7 @@
 // One step of the Apple checkout. checkout.py runs this in its Chrome tab every half second; each run looks at
 // the page, does at most one thing, and returns what it did. "WAIT ..." means it needs you (sign-in, card,
 // carrier info, anything it doesn't recognize); "DONE ..." means it reached Review. It never clicks Place Order.
-// checkout.py puts `var DUO = {store, storeName, zip, phone}` in front of this.
+// checkout.py puts `var DUO = {store, storeName, zip, phone, pickup}` in front of this.
 (() => {
   const url = location.href;
   const seen = el => !!el && (el.offsetParent !== null || el.getClientRects().length > 0);
@@ -80,6 +80,21 @@
   }
 
   function contact() {
+    // someone else picks up (DUO.pickup from local.env): choose that option and fill in their details
+    const pk = DUO.pickup || {};
+    if (pk.first) {
+      const other = vis("button[data-autom=thirdPartyPickup]")[0] || byText("button", /someone else will pick it up/i);
+      const first = vis("input[name=firstName]")[0];
+      if (!first) return other && act("thirdparty", () => other.click(), 3000) ? say("chose Someone else will pick it up") : say("waiting for the pickup form");
+      // the first email/phone on the page are the pickup person's; yours further down are prefilled from your account
+      const want = { firstName: pk.first, lastName: pk.last, emailAddress: pk.email, fullDaytimePhone: pk.phone };
+      const filled = [];
+      for (const [name, v] of Object.entries(want)) {
+        const box = vis(`input[name=${name}]`)[0];
+        if (box && v && !box.value) { setValue(box, v); filled.push(name); }
+      }
+      if (filled.length) return say("filled in pickup person " + pk.first + " " + (pk.last || "") + " (" + filled.join(", ") + ")");
+    }
     const m = missing();
     return m.length ? say("WAIT fill in the pickup contact: " + m.join(", ")) : next("pickup contact");
   }
@@ -92,6 +107,7 @@
     return m.length ? say("WAIT payment needs you: " + m.join(", ")) : next("payment");
   }
 
+  if (!/^https?:/.test(url)) return "page loading...";   // Safari's new window is about:blank for a moment
   if (/\/shop\/404/.test(url)) return say("WAIT Apple showed a 404 - open apple.com/shop/bag and check out by hand");
   if (placeOrder()) return say("DONE review the order and tap Place Your Order yourself");
   if (/\/shop\/signIn/i.test(url) || /^idmsa\./.test(location.hostname)) return say(  // idmsa: Apple Card checkout sign-in
