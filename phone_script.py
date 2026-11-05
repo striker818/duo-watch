@@ -116,11 +116,15 @@ __PREFILL__
   const go = async url => { if (Date.now() - lastGo < 6000) return; lastGo = Date.now(); cfg.restoreTries = (cfg.restoreTries || 0) + 1; await save(); location.href = url; };
   const restoreStep = () => {
     if (/\/shop\/bag/.test(location.pathname)) {
-      const inBag = [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")].map(b => b.textContent);
+      // a bag item's name is the same for every carrier; its "Carrier:" line tells T-Mobile from unlocked
+      const block = b => { let e = b; for (let i = 0; i < 10 && e.parentElement && !/Carrier:/.test(e.textContent); i++) e = e.parentElement; return e.textContent; };
+      const fits = (b, r) => b.textContent.includes(r.name) && block(b).includes(r.carrier);
+      const inBag = [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")].filter(b => (DUO.readyCart || []).some(r => fits(b, r))).map(b => b.textContent);
       if (!inBag.length && !/bag is empty/i.test(document.body.innerText)) return banner("setting the ready cart back up: reading the bag...");
       // after a dry run (cfg.test), the test phone comes out of the bag too; a real run never removes anything here
-      const stray = cfg.test ? [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")]
-        .filter(b => !(DUO.readyCart || []).some(r => b.textContent.includes(r.name))) : [];
+      // a dry run's test phone, or a Duo on the wrong carrier (left from before a FINANCING switch), comes out
+      const stray = [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")]
+        .filter(b => !(DUO.readyCart || []).some(r => fits(b, r)) && (cfg.test || (DUO.readyCart || []).some(r => b.textContent.includes(r.name))));
       if (stray.length) {
         if (Date.now() - lastGo > 2500) { lastGo = Date.now(); stray[0].click(); }
         return banner("dry run over: taking " + stray[0].textContent.replace(/^\s*Remove\s*/, "").trim() + " out of the bag");
@@ -184,7 +188,8 @@ def build():
     base = {"device": "phone", "zip": w.ZIP, "phone": os.environ.get("DUO_TMOBILE_NUMBER", ""), "financing": w.FINANCING,
             "pickup": {k: os.environ.get("DUO_PICKUP_" + k.upper(), "") for k in ("first", "last", "email", "phone")},
             # sizes to keep in the bag between drops, as the bag names them, and their buy pages
-            "readyCart": [{"name": "iPhone Duo " + w.PARTS[p][0].replace(" Unlocked", ""), "url": w.PARTS[p][1]} for p in w.READY_CART]}
+            "readyCart": [{"name": "iPhone Duo " + w.PARTS[p][0].replace(" Unlocked", ""), "url": w.PARTS[p][1],
+                           "carrier": "T-Mobile" if w.FINANCING else "any carrier"} for p in w.READY_CART]}
     src = (TEMPLATE.replace("__BASE__", json.dumps(base)).replace("__LOG__", json.dumps(w.NTFY_TOPIC + "-phonelog")).replace("__LIFE__", str(LIFETIME_MIN))
            .replace("__MACLOG__", json.dumps(w.NTFY_TOPIC + "-maclog"))
            .replace("__STEP__", (HERE / "checkout.js").read_text().rstrip().rstrip(";"))
