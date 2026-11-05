@@ -203,6 +203,9 @@ def alert(tab, status, test):
     try:
         front(tab)
         osa(NOTIFY, title, msg, "Hero" if done else "Glass")
+        if done:  # the signal: a sound you can't miss plus a spoken cue, in the background so the loop isn't held up
+            subprocess.Popen(["sh", "-c", "afplay /System/Library/Sounds/Hero.aiff; afplay /System/Library/Sounds/Hero.aiff; "
+                              "say 'Ready. Tap Place Your Order.'"])
     except Exception as e:
         w.log(f"checkout: Mac alert failed: {e}")
     if w.NTFY_TOPIC:

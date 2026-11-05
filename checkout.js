@@ -150,6 +150,13 @@
       ? say("the order still lists " + stale + " - refreshing Review") : say("waiting for " + stale + " to leave the order...");
     if (terms.length)
       return act("terms", () => labelOf(terms[0]).click(), 2000) ? say("accepted: " + text(labelOf(terms[0]))) : say("accepting terms...");
+    // bring Place Your Order into view and ring it in green so it's the first thing you see (never clicked here)
+    const po = placeOrder();
+    if (po && !window.__duoScrolled) {
+      window.__duoScrolled = true;
+      po.scrollIntoView({ block: "center", behavior: "instant" });
+      po.style.outline = "6px solid #30d158"; po.style.outlineOffset = "4px"; po.style.borderRadius = "12px";
+    }
     return say("DONE review the order and tap Place Your Order yourself");
   }
   if (/\/shop\/signIn/i.test(url) || /^idmsa\./.test(location.hostname)) return say(  // idmsa: Apple Card checkout sign-in
