@@ -143,6 +143,11 @@
     // Review: tick the carrier's Terms & Conditions box(es) so the order is ready; Place Your Order stays yours
     const terms = [...document.querySelectorAll("input[type=checkbox]")]
       .filter(c => !c.checked && !c.disabled && (seen(c) || seen(labelOf(c))) && /terms/i.test(c.id + " " + text(labelOf(c))));
+    // ready cart: the other size should be gone; if Review still lists it, refresh rather than stop the checkout
+    const pageText = text(document.body);
+    const stale = (DUO.dropItem || "").split("|").filter(Boolean).find(d => pageText.includes(d));
+    if (stale) return act("review_refresh", () => location.reload(), 6000)
+      ? say("the order still lists " + stale + " - refreshing Review") : say("waiting for " + stale + " to leave the order...");
     if (terms.length)
       return act("terms", () => labelOf(terms[0]).click(), 2000) ? say("accepted: " + text(labelOf(terms[0]))) : say("accepting terms...");
     return say("DONE review the order and tap Place Your Order yourself");
@@ -175,13 +180,15 @@
       return say("WAIT the bag is empty - nothing got added");
     }
     const removes = vis("button[data-autom=bag-item-remove-button]");
-    // a different size than the ready cart's is in stock: take the ready-cart phone out so only the in-stock one is ordered
+    // ready cart with a different size in stock: take the other size out first. It can't wait until after Check Out:
+    // Apple refuses to check out more than one carrier-connected iPhone at a time ("You can only order one
+    // carrier-connected device at a time"). If it's the only item, the bag empties and we fall back to the buy page.
     const drops = (DUO.dropItem || "").split("|").filter(Boolean);
-    // (even if it's the only item: then the bag empties and we fall back to the in-stock size's buy page)
-    const drop = removes.find(b => drops.some(d => text(b).includes(d)));
-    if (drop) return act("drop", () => drop.click(), 3000) ? say("removed " + text(drop).replace(/^Remove/, "") + " from the bag (not the size in stock)") : say("removing the other size...");
+    const extra = removes.filter(b => drops.some(d => text(b).includes(d)));
+    if (extra.length)
+      return act("drop", () => extra[0].click(), 1500) ? say("removed " + text(extra[0]).replace(/^Remove/, "") + " from the bag (not the size in stock)") : say("removing the other size...");
     // leftovers in the bag would go into the same order; let you decide rather than check out with them
-    const items = removes.length;
+    const items = removes.length - extra.length;
     if (items > 1) return say("WAIT the bag has " + items + " items - remove all but the phone, then I'll check out");
     // with Apple Card Monthly the button is bag-checkout-button, and the first click opens an Apple Card pop-up that
     // has its own copy of it; click the pop-up's one when it's open, or we just keep reopening the pop-up
