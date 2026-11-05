@@ -161,6 +161,8 @@ __PREFILL__
       return report("status " + location.hostname + location.pathname + " | run failed - setting the ready cart back up");
     }
     takeoverButton(typeof s === "string" && s.startsWith("WAIT the Mac"));
+    // you tapped the bag's Apple Pay button: the Mac stands down (it would otherwise keep checking out the same bag)
+    if (window.__duoExpress && !window.__duoExpressSent) { window.__duoExpressSent = true; report("takeover"); report("status " + location.hostname + location.pathname + " | you tapped Check out with Apple Pay"); }
     if (s !== lastS) {
       lastS = s; since = Date.now(); snapped = false;
       report("status " + location.hostname + location.pathname + " | " + s);
@@ -169,9 +171,10 @@ __PREFILL__
     else if (!snapped && Date.now() - since > 8000) { snapped = true; report("stuck " + snapshot()); }
     if (s === "NEED_PREFILL") window.__duoPrefillRun();
     // dry run reached the end: leave the final page up for 15s, then put the ready cart back
-    if (cfg.test && !cfg.restore && typeof s === "string" && s.startsWith("DONE")) {
+    const express = typeof s === "string" && s.startsWith("WAIT tap Check out with Apple Pay");
+    if (cfg.test && !cfg.restore && typeof s === "string" && (s.startsWith("DONE") || express)) {
       if (s !== lastS) { lastS = s; since = Date.now(); report("status " + location.hostname + location.pathname + " | " + s); }
-      if (Date.now() - since < 15000) return;
+      if (Date.now() - since < (express ? 30000 : 15000)) return;   // 30s at the bag: time to open the sheet, look, cancel
       cfg.restore = true; cfg.restoreTries = 0; cfg.restoreAt = Date.now(); await save();
       return report("status " + location.hostname + location.pathname + " | dry run done - setting the ready cart back up");
     }
