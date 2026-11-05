@@ -1,9 +1,20 @@
 // One step of the Apple checkout. checkout.py runs this in its Chrome tab every half second; each run looks at
 // the page, does at most one thing, and returns what it did. "WAIT ..." means it needs you (sign-in, card,
 // carrier info, anything it doesn't recognize); "DONE ..." means it reached Review. It never clicks Place Order.
-// checkout.py puts `var DUO = {store, storeName, zip, phone, pickup}` in front of this.
+// checkout.py (Mac) or the phone userscript (phone_script.py) puts `var DUO = {device, store, storeName, zip, ...}`
+// in front of this.
 (() => {
   const url = location.href;
+  // Each device runs its own sequence. Apple serves them different checkouts: the Mac gets separate pages ending in
+  // Review > Place Your Order; the phone gets one combined pickup + payment page ending in Continue with Apple Pay.
+  const PHONE = DUO.device === "phone";
+  const MODE = PHONE ? {
+    settleMs: 250,         // phone pages are quick and haven't swallowed clicks; keep the pause short
+    applePayFinal: true,   // its last page ends in Continue with Apple Pay (the Apple Pay sheet places the order)
+  } : {
+    settleMs: 500,         // Mac: a Continue clicked the instant a form appears gets swallowed (~9s lost), so wait a bit
+    applePayFinal: false,  // its last page is Review with Place Your Order
+  };
   const seen = el => !!el && (el.offsetParent !== null || el.getClientRects().length > 0);
   const vis = sel => [...document.querySelectorAll(sel)].filter(seen);
   const text = el => (el.textContent || "").replace(/\s+/g, " ").trim();
@@ -75,9 +86,14 @@
     const b = vis("button[id^=rs-checkout-continue-button]").filter(notPay)[0]
       || vis("button").filter(notPay).find(e => /^continue( to .*)?$/i.test(text(e)));
     if (!b) {
-      // phone: no Continue, just "Continue with Apple Pay" - that's the last page
+      // no Continue, just "Continue with Apple Pay": the phone's last page (the Mac doesn't normally get it, but if it
+      // ever does, it's the last page there too - confirmed with Touch ID)
       const pay = vis("button, [role=button]").find(e => /^continue with/i.test(text(e)) || /apple\s*pay/i.test(e.getAttribute("aria-label") || ""));
-      if (pay) { const m = missing(); if (m.length) return say("WAIT fill in: " + m.join(", ")); return finish(pay, "tap Continue with Apple Pay, then confirm with Face ID"); }
+      if (pay) {
+        const m = missing();
+        if (m.length) return say("WAIT fill in: " + m.join(", "));
+        return finish(pay, "tap Continue with Apple Pay, then confirm with " + (MODE.applePayFinal ? "Face ID" : "Touch ID"));
+      }
       return say(step + ": looking for Continue");
     }
     if (/place|order|submit|pay now/i.test(text(b))) return say("DONE review the order and tap Place Your Order yourself");
@@ -86,7 +102,7 @@
     // the page and needed a second click), so let each step settle for a moment first
     const k = "__duoSeen_" + step;
     if (!window[k]) window[k] = Date.now();
-    if (Date.now() - window[k] < 500) return say(step + ": letting the form settle");
+    if (Date.now() - window[k] < MODE.settleMs) return say(step + ": letting the form settle");
     // clicking again on the same step: note what the page complained about, to fix next time
     const again = window["__duoAct_next_" + step];
     const errs = again ? vis("[role=alert], .form-message-error, [class*=error-message], [class*=errorMessage]").map(text).filter(Boolean).slice(0, 2).join(" / ") : "";

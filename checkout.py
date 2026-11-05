@@ -13,7 +13,7 @@ and phone, waits, and carries on once you've done it. It never places the order:
 Needs Allow JavaScript from Apple Events: Safari > Develop menu (turn on Settings > Advanced > Show features for web
 developers first), or Chrome > View > Developer.
 """
-import json, os, subprocess, sys, time, urllib.request
+import json, os, subprocess, sys, threading, time, urllib.request
 from pathlib import Path
 
 import duo_watch as w
@@ -217,8 +217,32 @@ def alert(tab, status, test):
             w.log(f"checkout: ntfy failed: {e}")
 
 
+def watch_phone(since, flag):
+    """Sets flag once the phone checkout (phone_script.py) reports progress after `since`: you're checking out there, so
+    the Mac should stop clicking in the shared bag/checkout. Polls the phone's private log topic on ntfy every 2s."""
+    if not w.NTFY_TOPIC:
+        return
+    url = f"https://ntfy.sh/{w.NTFY_TOPIC}-phonelog/json?poll=1&since={int(since)}"
+    while not flag.is_set():
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                for line in r:
+                    m = json.loads(line)
+                    if m.get("event") == "message" and m.get("time", 0) >= since and m.get("message", "").startswith("status "):
+                        flag.set(); return
+        except Exception:
+            pass
+        time.sleep(2)
+
+
+STAND_DOWN_JS = """clearInterval(window.__duoLoop); window.__duoStep = () => "stopped";
+var b = document.getElementById("duo-banner");
+if (b) { b.style.background = "#6e6e73"; b.textContent = "Duo checkout: you're checking out on your phone - the Mac stopped here"; }
+1"""
+
+
 def drive(url, store="", store_name="", add_to_bag=True, test=False):
-    args = {'store': store, 'storeName': store_name, 'zip': w.ZIP, 'phone': os.environ.get('DUO_TMOBILE_NUMBER', ''),
+    args = {'device': 'mac', 'store': store, 'storeName': store_name, 'zip': w.ZIP, 'phone': os.environ.get('DUO_TMOBILE_NUMBER', ''),
             'pickup': {k: os.environ.get('DUO_PICKUP_' + k.upper(), '') for k in ('first', 'last', 'email', 'phone')},
             # ready cart (see duo_watch.start_checkout): where to go if the bag turns out empty, and which bag item to
             # take out when a different size is the one in stock
@@ -246,11 +270,16 @@ if (!window.__duoLoop) {{
 }}
 window.__duoStatus || "starting"
 """
+    phone = threading.Event()   # set when you start the same checkout on your phone
+    threading.Thread(target=watch_phone, args=(time.time(), phone), daemon=True).start()
     tab = open_tab(url)
     w.log(f"checkout: driving {BROWSER} {'window' if SAFARI else 'tab'} {tab} for {store_name or url}")
     last_raw, since, logged, told, adding, carrier_runs, flagged, adds = None, time.time(), None, None, None, 0, None, 0
     end = time.time() + LIMIT
     while time.time() < end:
+        if phone.is_set():
+            js(tab, STAND_DOWN_JS)
+            return w.log("checkout: you're checking out on your phone - the Mac stopped so they don't fight over the bag")
         s = raw = js(tab, boot_js)
         if s == "__notab__":
             return w.log("checkout: tab was closed - stopping")

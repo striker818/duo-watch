@@ -89,7 +89,7 @@ __PREFILL__
 
 
 def build():
-    base = {"zip": w.ZIP, "phone": os.environ.get("DUO_TMOBILE_NUMBER", ""),
+    base = {"device": "phone", "zip": w.ZIP, "phone": os.environ.get("DUO_TMOBILE_NUMBER", ""),
             "pickup": {k: os.environ.get("DUO_PICKUP_" + k.upper(), "") for k in ("first", "last", "email", "phone")}}
     src = (TEMPLATE.replace("__BASE__", json.dumps(base)).replace("__LOG__", json.dumps(w.NTFY_TOPIC + "-phonelog")).replace("__LIFE__", str(LIFETIME_MIN))
            .replace("__STEP__", (HERE / "checkout.js").read_text().rstrip().rstrip(";"))
