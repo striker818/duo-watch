@@ -119,7 +119,7 @@ __PREFILL__
       const inBag = [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")].map(b => b.textContent);
       if (!inBag.length && !/bag is empty/i.test(document.body.innerText)) return banner("setting the ready cart back up: reading the bag...");
       const missing = (DUO.readyCart || []).filter(r => !inBag.some(t => t.includes(r.name)));
-      if (!missing.length) return banner("DONE ready cart is set up again for the next drop", "#248a3d");
+      if (!missing.length) return banner("DONE ready cart is back in the bag for the next drop", "#248a3d");
       if ((cfg.restoreTries || 0) >= 6) return banner("DONE couldn't put " + missing.map(r => r.name).join(" + ") + " back in the bag - add it by hand", "#d70015");
       go(missing[0].url);
       return banner("setting the ready cart back up: adding " + missing[0].name);
