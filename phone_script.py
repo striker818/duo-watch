@@ -48,7 +48,7 @@ TEMPLATE = """// ==UserScript==
   } else {
     try { cfg = JSON.parse(await GM.getValue("duo", "null")); } catch (e) { cfg = null; }
   }
-  if (!cfg || Date.now() - cfg.t > __LIFE__ * 60000) return;   // only right after an alert, never while you browse
+  if (!cfg || Date.now() - (cfg.restoreAt || cfg.t) > __LIFE__ * 60000) return;   // only right after an alert, never while you browse
   // Only the tab the alert opened acts. Tabs left open from a test or a failed run used to pick up the new alert too
   // and tap Check Out on the same bag (Apple 404s a second checkout of one bag). The alert's tab is tagged
   // window.name = "duo-<time the alert was opened>"; a tab tagged for an older alert stays out. Safari empties
@@ -104,6 +104,30 @@ __PREFILL__
     };
     document.body.appendChild(b);
   };
+  // After a run fails (sold out by the time checkout gets there), put the ready cart back for the next drop: the run
+  // took the other size out of the bag. Bag > buy page of each missing size (prefill + Add to Bag) > bag > stop.
+  const banner = (msg, color) => {
+    let b = document.getElementById("duo-banner");
+    if (!b) { b = document.createElement("div"); b.id = "duo-banner"; document.body.appendChild(b); }
+    b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:12px;font:600 16px -apple-system;text-align:center;color:#fff;pointer-events:none;background:" + (color || "#0071e3");
+    b.textContent = "Duo: " + msg; return msg;
+  };
+  let lastGo = 0;
+  const go = async url => { if (Date.now() - lastGo < 6000) return; lastGo = Date.now(); cfg.restoreTries = (cfg.restoreTries || 0) + 1; await save(); location.href = url; };
+  const restoreStep = () => {
+    if (/\/shop\/bag/.test(location.pathname)) {
+      const inBag = [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")].map(b => b.textContent);
+      if (!inBag.length && !/bag is empty/i.test(document.body.innerText)) return banner("setting the ready cart back up: reading the bag...");
+      const missing = (DUO.readyCart || []).filter(r => !inBag.some(t => t.includes(r.name)));
+      if (!missing.length) return banner("DONE ready cart is set up again for the next drop", "#248a3d");
+      if ((cfg.restoreTries || 0) >= 6) return banner("DONE couldn't put " + missing.map(r => r.name).join(" + ") + " back in the bag - add it by hand", "#d70015");
+      go(missing[0].url);
+      return banner("setting the ready cart back up: adding " + missing[0].name);
+    }
+    if (/\/shop\/buy-iphone/.test(location.pathname)) return step();   // prefill, Add to Bag, Review Bag
+    go("https://www.apple.com/shop/bag");
+    return banner("setting the ready cart back up: going to the bag");
+  };
   let lastS = "", since = Date.now(), snapped = false, lastCheck = 0;
   const loop = setInterval(async () => {
     // a newer alert opened in another tab (or this run finished elsewhere): this tab stops for good
@@ -119,7 +143,12 @@ __PREFILL__
       }
     }
     let s;
-    try { s = step(); } catch (e) { s = "script error: " + e.message; }
+    try { s = cfg.restore ? restoreStep() : step(); } catch (e) { s = "script error: " + e.message; }
+    // the drop is over by the time checkout got there: after 8s (time to see it) set the ready cart back up
+    if (!cfg.restore && s === lastS && /sold out and no other store/.test(s) && Date.now() - since > 8000 && (DUO.readyCart || []).length) {
+      cfg.restore = true; cfg.restoreTries = 0; cfg.restoreAt = Date.now(); await save();   // fresh 20 min for the restore
+      return report("status " + location.hostname + location.pathname + " | run failed - setting the ready cart back up");
+    }
     takeoverButton(typeof s === "string" && s.startsWith("WAIT the Mac"));
     if (s !== lastS) {
       lastS = s; since = Date.now(); snapped = false;
@@ -139,7 +168,9 @@ __PREFILL__
 
 def build():
     base = {"device": "phone", "zip": w.ZIP, "phone": os.environ.get("DUO_TMOBILE_NUMBER", ""),
-            "pickup": {k: os.environ.get("DUO_PICKUP_" + k.upper(), "") for k in ("first", "last", "email", "phone")}}
+            "pickup": {k: os.environ.get("DUO_PICKUP_" + k.upper(), "") for k in ("first", "last", "email", "phone")},
+            # sizes to keep in the bag between drops, as the bag names them, and their buy pages
+            "readyCart": [{"name": "iPhone Duo " + w.PARTS[p][0].replace(" T-Mobile", ""), "url": w.PARTS[p][1]} for p in w.READY_CART]}
     src = (TEMPLATE.replace("__BASE__", json.dumps(base)).replace("__LOG__", json.dumps(w.NTFY_TOPIC + "-phonelog")).replace("__LIFE__", str(LIFETIME_MIN))
            .replace("__MACLOG__", json.dumps(w.NTFY_TOPIC + "-maclog"))
            .replace("__STEP__", (HERE / "checkout.js").read_text().rstrip().rstrip(";"))
