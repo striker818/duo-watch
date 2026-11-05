@@ -183,6 +183,10 @@
     const acmi = DUO.financing && radios(/./).find(r => /apple card monthly/i.test(text(labelOf(r))));
     if (acmi && !acmi.checked)
       return act("acmi", () => labelOf(acmi).click(), 3000) ? say("chose Apple Card Monthly Installments") : say("selecting Apple Card...");
+    // paying in full: Apple Pay, not the saved card Apple preselects (value APPLE_PAY, label "Apple Pay")
+    const applePay = !DUO.financing && radios(/billing/i).find(r => /APPLE_PAY/i.test(r.value) || /^\s*apple pay/i.test(text(labelOf(r))));
+    if (applePay && !applePay.checked)
+      return act("applepay", () => labelOf(applePay).click(), 3000) ? say("chose Apple Pay") : say("selecting Apple Pay...");
     const m = missing();
     return m.length ? say("WAIT payment needs you: " + m.join(", ")) : next("payment");
   }
@@ -255,7 +259,13 @@
     if (/^PickupContact/i.test(step)) return contact();
     if (/^Billing/i.test(step)) return billing();
     if (!step || /processing/i.test(document.title)) return say("loading checkout...");  // brief page after sign-in
-    if (/^Review/i.test(step)) return say("loading the order review...");                  // Place Your Order not drawn yet
+    if (/^Review/i.test(step)) {
+      // paid with Apple Pay, the last button is Apple's Apple Pay button instead of Place Your Order; it opens the Apple
+      // Pay sheet, where you confirm. Never clicked here.
+      const pay = vis("button, [role=button], apple-pay-button, [class*=apple-pay]").find(e => /apple\s*pay/i.test(text(e) + " " + (e.getAttribute("aria-label") || "") + " " + (e.className || "") + " " + e.tagName));
+      if (pay) return finish(pay, "tap the Apple Pay button, then confirm with " + (PHONE ? "Face ID" : "Touch ID"));
+      return say("loading the order review...");                  // Place Your Order not drawn yet
+    }
     return say("WAIT checkout step '" + step + "' needs you");
   }
   if (/(^|\.)apple\.com$/.test(location.hostname)) return rescue("unexpected page '" + document.title + "'");
