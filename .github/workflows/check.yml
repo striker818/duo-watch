@@ -22,6 +22,7 @@ jobs:
       DUO_HISTORY: data/stock_history.csv
       DUO_LOG: duo_watch.log
       TZ: America/Chicago   # history times in Central, same as the Mac
+      DUO_READY_CART: MK1E4LL/A,MK1G4LL/A   # both sizes sit in the shared bag, so phone alerts open the bag
       MINUTES: ${{ inputs.minutes || '345' }}
     steps:
       - uses: actions/checkout@v4
