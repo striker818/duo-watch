@@ -256,7 +256,7 @@ if (b) { b.style.background = "#6e6e73"; b.textContent = "Duo checkout: you're c
 
 
 def drive(url, store="", store_name="", add_to_bag=True, test=False):
-    args = {'device': 'mac', 'store': store, 'storeName': store_name, 'zip': w.ZIP, 'phone': os.environ.get('DUO_TMOBILE_NUMBER', ''),
+    args = {'device': 'mac', 'store': store, 'storeName': store_name, 'zip': w.ZIP, 'phone': os.environ.get('DUO_TMOBILE_NUMBER', ''), 'financing': w.FINANCING,
             'pickup': {k: os.environ.get('DUO_PICKUP_' + k.upper(), '') for k in ('first', 'last', 'email', 'phone')},
             # ready cart (see duo_watch.start_checkout): where to go if the bag turns out empty, and which bag item to
             # take out when a different size is the one in stock
@@ -434,9 +434,9 @@ if __name__ == "__main__":
     elif a and a[0] == "--test-phone":
         # any iPhone 18 Pro with pickup nearby, on T-Mobile: same page flow as the Duo
         part, store, name = test_store(tuple(PRO_18))
-        print(f"Dry run with an iPhone 18 Pro {PRO_18[part]} (Apple Card Monthly, T-Mobile), "
+        print(f"Dry run with an iPhone 18 Pro {PRO_18[part]} ({'Apple Card Monthly, T-Mobile' if w.FINANCING else 'paid in full, unlocked'}), "
               f"pickup at {name or '(no store found - it will ask you)'}. Stops at Review.")
-        drive(f"https://www.apple.com/shop/buy-iphone/iphone-18-pro/{PRO_18[part]}-t-mobile?purchaseOption=bfi&cppart=TMOBILE_IPHONE18PRO",
+        drive(f"https://www.apple.com/shop/buy-iphone/iphone-18-pro/{PRO_18[part]}-" + ("t-mobile?purchaseOption=bfi&cppart=TMOBILE_IPHONE18PRO" if w.FINANCING else "unlocked" + w.PRESET),
               store, name, test=True)
     elif a and a[0] == "--test":
         _, store, name = test_store()

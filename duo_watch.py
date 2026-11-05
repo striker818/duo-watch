@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """iPhone Duo stock agent - checks Apple Store pickup near you, alerts you, and on the Mac drives checkout
 (checkout.py) up to the point it needs you.
-Config: iPhone Duo (T-Mobile, no AppleCare, Apple Card Monthly Installments) Star White 256GB (MK1E4LL/A) + 512GB (MK1G4LL/A), pickup near DUO_ZIP.
+Config: iPhone Duo (unlocked, paid in full, no AppleCare) Star White 256GB (MK1E4LL/A) + 512GB (MK1G4LL/A), pickup near DUO_ZIP.
 """
 import json, os, smtplib, subprocess, sys, threading, time, urllib.request
 from email.message import EmailMessage
 from pathlib import Path
 
 BASE = "https://www.apple.com/shop/buy-iphone/iphone-duo/7.6-inch-display-"
-# these params make the page open with Finance > Apple Card Monthly Installments and T-Mobile already chosen
-# (no trade-in is the default; AppleCare can't be preset from the URL)
-PRESET = "?purchaseOption=bfi&cppart=TMOBILE_IPHONEDUO"
+# these params make the page open with Buy (pay in full) and Connect to any carrier later (unlocked) already chosen
+# (no trade-in is the default; AppleCare can't be preset from the URL). Until 2026-11-05 it was Apple Card Monthly +
+# T-Mobile: "?purchaseOption=bfi&cppart=TMOBILE_IPHONEDUO" on the -t-mobile pages. Part numbers are the same either way.
+PRESET = "?purchaseOption=fullPrice&cppart=UNLOCKED/US"
+FINANCING = False   # True = Apple Card Monthly + T-Mobile (needs the old PRESET and -t-mobile pages); prefill.js and checkout.js follow it
 PARTS = {  # part number -> (label, buy page)
-    "MK1E4LL/A": ("256GB Star White T-Mobile", BASE + "256gb-star-white-t-mobile" + PRESET),
-    "MK1G4LL/A": ("512GB Star White T-Mobile", BASE + "512gb-star-white-t-mobile" + PRESET),
+    "MK1E4LL/A": ("256GB Star White Unlocked", BASE + "256gb-star-white-unlocked" + PRESET),
+    "MK1G4LL/A": ("512GB Star White Unlocked", BASE + "512gb-star-white-unlocked" + PRESET),
 }
 # personal settings (ntfy topic, email, gmail app password) live in local.env next to this file, which git ignores
 _local = Path(__file__).with_name("local.env")
@@ -52,7 +54,7 @@ def log(msg):
 def check():
     req = urllib.request.Request(URL, headers={
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
-        "Accept": "application/json", "Referer": BASE + "256gb-star-white-t-mobile"})
+        "Accept": "application/json", "Referer": BASE + "256gb-star-white-unlocked"})
     with urllib.request.urlopen(req, timeout=20) as r:
         data = json.load(r)
     stores = data["body"].get("stores", [])
@@ -67,7 +69,7 @@ def check():
     return hits, len(stores)
 
 CHECKOUT_PID = Path.home() / ".duo_checkout.pid"
-# Ready cart: this part (e.g. MK1E4LL/A) sits in the Safari bag ahead of time with Apple Card + T-Mobile + no AppleCare
+# Ready cart: this part (e.g. MK1E4LL/A) sits in the Safari bag ahead of time, unlocked, paid in full, no AppleCare
 # (Apple lets it in while pickup is sold out). When it's the one in stock, checkout starts at the bag and skips the buy
 # page, the option picking and Add to Bag - the step Apple sometimes answers with a 404 at drop time.
 READY_CART = [p.strip() for p in os.environ.get("DUO_READY_CART", "").split(",") if p.strip() in PARTS]  # one or both sizes
@@ -88,7 +90,7 @@ def choose(hits):
 
 def drop_items(part):
     """Ready-cart sizes to take out of the bag when `part` is the one in stock, as the bag names them."""
-    return "|".join("iPhone Duo " + PARTS[p][0].replace(" T-Mobile", "") for p in READY_CART if p != part)
+    return "|".join("iPhone Duo " + PARTS[p][0].replace(" Unlocked", "") for p in READY_CART if p != part)
 
 def phone_link(h):
     """Phone alert link: with the ready cart, the bag (the phone userscript, phone_script.py, takes it from there);
@@ -136,21 +138,21 @@ def notify(hits, add_to_bag=True):
     urls = list(dict.fromkeys(u for _, u, *_ in hits))
     BUY_URL = urls[0]
     body = ("iPhone Duo IN STOCK for pickup:\n" + "\n".join(h[2] for h in hits)
-            + "\n\nCheckout: pick T-Mobile, NO AppleCare, Apple Card Monthly Installments, then Pickup.\n"
+            + "\n\nCheckout: Buy (pay in full), Connect to any carrier later, NO AppleCare, then Pickup.\n"
             + "Buy now:\n" + "\n".join(urls))
     if MAC:
         # Mac popup + sound
         subprocess.run(["osascript", "-e", f'display notification "{hits[0][2]}" with title "iPhone Duo in stock!" sound name "Glass"'])
     if NTFY_TOPIC:
         # phone push: title says size + store, plus one button per in-stock size. Links use x-safari-https:// (iOS 17+)
-        # so they open in Safari: faster than the Apple Store app, and Safari keeps the Apple Card + T-Mobile presets
-        first = hits[0][2].split(" (")[0].replace(" Star White T-Mobile", "")       # "512GB @ Mall of America"
+        # so they open in Safari: faster than the Apple Store app, and Safari keeps the pay-in-full + unlocked presets
+        first = hits[0][2].split(" (")[0].replace(" Star White Unlocked", "")       # "512GB @ Mall of America"
         best = choose(hits)
         phone_body = ("\n".join(h[2].split(" - ")[0] for h in hits)
                       + ("\nAt the Mac? It's checking out in Safari - sign in, then Place Your Order." if MAC else "")
                       + ("\nOn phone: tap to open your bag - it removes the other size and checks out; Face ID, then Place Your Order."
                          if part_of(best) in READY_CART else
-                         "\nOn phone: opens Safari with Apple Card Monthly + T-Mobile set. Tap No AppleCare > Add to Bag > Pickup at that store"))
+                         "\nOn phone: opens Safari with Buy + unlocked set. Tap No AppleCare > Add to Bag > Pickup at that store"))
         # one button per in-stock size (best first); each opens the bag set up for that size and store
         firsts = {}
         for h in sorted(hits, key=lambda h: h is not best):
@@ -232,7 +234,7 @@ def listen():
 def track(hits):
     """Record how long each size stays in stock at each store. Times are only as precise as the 60s polling."""
     now = time.time()
-    current = {h[2].split(" (")[0] for h in hits}                 # "512GB Star White T-Mobile @ Mall of America"
+    current = {h[2].split(" (")[0] for h in hits}                 # "512GB Star White Unlocked @ Mall of America"
     opened = json.loads(OPEN.read_text()) if OPEN.exists() else {}
     for key in current - opened.keys():
         opened[key] = now

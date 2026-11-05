@@ -178,7 +178,9 @@
   }
 
   function billing() {
-    const acmi = radios(/./).find(r => /apple card monthly/i.test(text(labelOf(r))));
+    // Apple Card Monthly Installments only when financing (DUO.financing); the payment page can offer it on a paid-in-full
+    // order too, and choosing it there would turn the order into financing
+    const acmi = DUO.financing && radios(/./).find(r => /apple card monthly/i.test(text(labelOf(r))));
     if (acmi && !acmi.checked)
       return act("acmi", () => labelOf(acmi).click(), 3000) ? say("chose Apple Card Monthly Installments") : say("selecting Apple Card...");
     const m = missing();
