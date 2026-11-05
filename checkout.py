@@ -218,8 +218,10 @@ def alert(tab, status, test):
 
 
 def watch_phone(since, flag):
-    """Sets flag once the phone checkout (phone_script.py) reports progress after `since`: you're checking out there, so
-    the Mac should stop clicking in the shared bag/checkout. Polls the phone's private log topic on ntfy every 2s."""
+    """Sets flag once you're checking out on the phone (phone_script.py) after `since`: its checkout reached a
+    /checkout page, or you tapped "Check out on this phone". Then the Mac stops clicking in the shared bag/checkout.
+    Just opening the alert link doesn't count: on 2026-11-04 the phone's bag loop made the Mac stand down while you
+    were signing in on the Mac, so nothing picked the pickup time there. Polls the phone's private ntfy log every 2s."""
     if not w.NTFY_TOPIC:
         return
     url = f"https://ntfy.sh/{w.NTFY_TOPIC}-phonelog/json?poll=1&since={int(since)}"
@@ -228,11 +230,23 @@ def watch_phone(since, flag):
             with urllib.request.urlopen(url, timeout=10) as r:
                 for line in r:
                     m = json.loads(line)
-                    if m.get("event") == "message" and m.get("time", 0) >= since and m.get("message", "").startswith("status "):
+                    msg = m.get("message", "")
+                    if m.get("event") != "message" or m.get("time", 0) < since:
+                        continue
+                    if msg.startswith("takeover") or (msg.startswith("status ") and "/checkout" in msg.split(" | ")[0]):
                         flag.set(); return
         except Exception:
             pass
         time.sleep(2)
+
+
+def tell_phone(state):
+    """Tell the phone checkout whether the Mac is past the bag ("mac checkout") or done ("mac stopped"), on the Mac's
+    own private ntfy log. While the Mac is in checkout the phone doesn't click Check Out on the same bag (that gave
+    Apple 404s on 2026-11-04) and offers a "Check out on this phone" button instead."""
+    if w.NTFY_TOPIC:
+        threading.Thread(target=lambda: urllib.request.urlopen(urllib.request.Request(
+            f"https://ntfy.sh/{w.NTFY_TOPIC}-maclog", data=state.encode()), timeout=10), daemon=True).start()
 
 
 STAND_DOWN_JS = """clearInterval(window.__duoLoop); window.__duoStep = () => "stopped";
@@ -274,7 +288,15 @@ window.__duoStatus || "starting"
     threading.Thread(target=watch_phone, args=(time.time(), phone), daemon=True).start()
     tab = open_tab(url)
     w.log(f"checkout: driving {BROWSER} {'window' if SAFARI else 'tab'} {tab} for {store_name or url}")
+    try:
+        return _drive(tab, boot_js, phone, add_to_bag, test)
+    finally:
+        tell_phone("mac stopped")
+
+
+def _drive(tab, boot_js, phone, add_to_bag, test):
     last_raw, since, logged, told, adding, carrier_runs, flagged, adds = None, time.time(), None, None, None, 0, None, 0
+    in_checkout = False
     end = time.time() + LIMIT
     while time.time() < end:
         if phone.is_set():
@@ -318,6 +340,8 @@ window.__duoStatus || "starting"
             s = f"WAIT stuck at: {s} - take over from here"
         if s != logged:
             w.log("checkout: " + s); logged = s
+            if not in_checkout and "Check Out" in s:
+                in_checkout = True; tell_phone("mac checkout")
         if s.startswith(("WAIT", "DONE")) and s != told:
             told = s
             alert(tab, s, test)

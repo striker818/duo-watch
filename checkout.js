@@ -49,12 +49,15 @@
     .map(e => (e.labels && e.labels[0] ? text(e.labels[0]) : e.name || e.id));
   const placeOrder = () => byText("button", /place (your )?order/i);
   // Apple sometimes lands somewhere odd after Add to Bag (a 404, or the iPhone overview when the buy page reloads as
-  // stock runs out). The phone is usually already in the bag, so go to the bag and carry on, up to 3 times.
+  // stock runs out). The phone is usually already in the bag, so go to the bag and carry on, up to 2 times.
+  // The phone keeps the count in the extension's storage (DUO.rescues): page storage didn't hold it there, and on
+  // 2026-11-04 it looped bag > Check Out > 404 about 35 times in 20s.
+  const rescues = DUO.rescues || { get: () => +(sessionStorage.__duoRescues || 0), set: async n => { sessionStorage.__duoRescues = n; } };
   function rescue(why) {
-    const n = +(sessionStorage.__duoRescues || 0);
+    const n = rescues.get();
     const where = location.pathname + location.search;
-    if (n >= 3) return say("WAIT " + why + " (" + where + ") - open apple.com/shop/bag and check out by hand");
-    if (act("rescue", () => { sessionStorage.__duoRescues = n + 1; location.href = "https://www.apple.com/shop/bag"; }, 4000))
+    if (n >= 2) return say("WAIT " + why + " (" + where + ") - open apple.com/shop/bag and check out by hand");
+    if (act("rescue", async () => { await rescues.set(n + 1); location.href = "https://www.apple.com/shop/bag"; }, 4000))
       return say("off track: " + why + " at " + where + " - reopening the bag");
     return say("reopening the bag...");
   }
@@ -207,6 +210,9 @@
     return b && !b.disabled && act("bag", () => b.click()) ? say("clicked Add to Bag") : say("adding to bag...");
   }
   if (/\/shop\/bag/.test(url)) {
+    // the Mac already took this bag into checkout: don't start a second checkout of it (Apple answered the phone's
+    // Check Out with a 404 when both did). The phone script shows a button to move the checkout here instead.
+    if (PHONE && DUO.macBusy && !DUO.takeover) return say("WAIT the Mac is already checking out - finish there, or tap Check out on this phone");
     if (/bag is empty/i.test(document.body.innerText)) {
       // started from the ready cart but it's gone (Apple cleared it): fall back to the buy page
       if (DUO.buyUrl && act("tobuy", () => { location.href = DUO.buyUrl; }, 8000)) return say("the ready cart was empty - opening the buy page");

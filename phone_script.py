@@ -36,6 +36,7 @@ TEMPLATE = """// ==UserScript==
 (async () => {
   const BASE = __BASE__;
   const LOG_TOPIC = __LOG__;
+  const MAC_TOPIC = __MACLOG__;
   // the alert link carries #duo=<json>: which store, which bag item to drop. Remember it across apple.com pages
   // (they're different sites, so page storage won't carry over; the extension's storage does).
   let cfg = null;
@@ -49,6 +50,17 @@ TEMPLATE = """// ==UserScript==
   }
   if (!cfg || Date.now() - cfg.t > __LIFE__ * 60000) return;   // only right after an alert, never while you browse
   var DUO = Object.assign({}, BASE, cfg);
+  const save = () => GM.setValue("duo", JSON.stringify(cfg));
+  DUO.rescues = { get: () => cfg.rescues || 0, set: n => { cfg.rescues = n; return save(); } };   // survives page loads
+  // Is the Mac already past the bag? checkout.py posts "mac checkout" / "mac stopped" to its private log.
+  const macPoll = () => GM.xmlHttpRequest({
+    method: "GET", url: "https://ntfy.sh/" + MAC_TOPIC + "/json?poll=1&since=" + Math.floor((cfg.t - 120000) / 1000),
+    onload: r => {
+      const states = (r.responseText || "").split("\\n").filter(Boolean).map(l => { try { return JSON.parse(l).message; } catch (e) { return ""; } })
+        .filter(m => /^mac (checkout|stopped)$/.test(m || ""));
+      DUO.macBusy = states.length > 0 && states[states.length - 1] === "mac checkout";
+    } });
+  macPoll(); setInterval(macPoll, 2000);
   const step = () => (
 __STEP__
   );
@@ -68,10 +80,24 @@ __PREFILL__
     const errs = [...document.querySelectorAll("[role=alert], [class*=error]")].filter(seen).map(t).filter(Boolean).slice(0, 5);
     return JSON.stringify({ path: location.pathname + location.search.slice(0, 80), w: innerWidth, btns, radios, fields, errs });
   };
+  // while the Mac has the checkout: one tap moves it here (the Mac stops when it sees "takeover")
+  const takeoverButton = show => {
+    let b = document.getElementById("duo-takeover");
+    if (!show) { if (b) b.remove(); return; }
+    if (b) return;
+    b = document.createElement("button"); b.id = "duo-takeover"; b.textContent = "Check out on this phone";
+    b.style.cssText = "position:fixed;left:16px;right:16px;bottom:24px;z-index:2147483647;padding:16px;font:600 18px -apple-system;color:#fff;background:#0071e3;border:0;border-radius:14px";
+    b.onclick = async () => {
+      cfg.takeover = true; DUO.takeover = true; cfg.rescues = 0; await save();
+      report("takeover"); location.href = "https://www.apple.com/shop/bag";
+    };
+    document.body.appendChild(b);
+  };
   let lastS = "", since = Date.now(), snapped = false;
   const loop = setInterval(async () => {
     let s;
     try { s = step(); } catch (e) { s = "script error: " + e.message; }
+    takeoverButton(typeof s === "string" && s.startsWith("WAIT the Mac"));
     if (s !== lastS) {
       lastS = s; since = Date.now(); snapped = false;
       report("status " + location.hostname + location.pathname + " | " + s);
@@ -92,6 +118,7 @@ def build():
     base = {"device": "phone", "zip": w.ZIP, "phone": os.environ.get("DUO_TMOBILE_NUMBER", ""),
             "pickup": {k: os.environ.get("DUO_PICKUP_" + k.upper(), "") for k in ("first", "last", "email", "phone")}}
     src = (TEMPLATE.replace("__BASE__", json.dumps(base)).replace("__LOG__", json.dumps(w.NTFY_TOPIC + "-phonelog")).replace("__LIFE__", str(LIFETIME_MIN))
+           .replace("__MACLOG__", json.dumps(w.NTFY_TOPIC + "-maclog"))
            .replace("__STEP__", (HERE / "checkout.js").read_text().rstrip().rstrip(";"))
            .replace("__PREFILL__", (HERE / "prefill.js").read_text()))
     OUT.parent.mkdir(parents=True, exist_ok=True)
