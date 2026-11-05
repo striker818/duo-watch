@@ -212,6 +212,9 @@
   if (/\/shop\/bag/.test(url)) {
     // the Mac already took this bag into checkout: don't start a second checkout of it (Apple answered the phone's
     // Check Out with a 404 when both did). The phone script shows a button to move the checkout here instead.
+    // macBusy is undefined until the phone script's first look at the Mac's state comes back (~0.3s): in the dry run
+    // the phone clicked Check Out in that gap and got the same 404
+    if (PHONE && DUO.macBusy === undefined && !DUO.takeover) return say("checking whether the Mac is already checking out...");
     if (PHONE && DUO.macBusy && !DUO.takeover) return say("WAIT the Mac is already checking out - finish there, or tap Check out on this phone");
     if (/bag is empty/i.test(document.body.innerText)) {
       // started from the ready cart but it's gone (Apple cleared it): fall back to the buy page

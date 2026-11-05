@@ -59,8 +59,11 @@ TEMPLATE = """// ==UserScript==
       const states = (r.responseText || "").split("\\n").filter(Boolean).map(l => { try { return JSON.parse(l).message; } catch (e) { return ""; } })
         .filter(m => /^mac (checkout|stopped)$/.test(m || ""));
       DUO.macBusy = states.length > 0 && states[states.length - 1] === "mac checkout";
-    } });
+    },
+    onerror: () => { if (DUO.macBusy === undefined) DUO.macBusy = false; },   // can't tell: don't hold the phone up
+    ontimeout: () => { if (DUO.macBusy === undefined) DUO.macBusy = false; }, timeout: 3000 });
   macPoll(); setInterval(macPoll, 2000);
+  setTimeout(() => { if (DUO.macBusy === undefined) DUO.macBusy = false; }, 3000);
   const step = () => (
 __STEP__
   );

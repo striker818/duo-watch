@@ -13,7 +13,7 @@ and phone, waits, and carries on once you've done it. It never places the order:
 Needs Allow JavaScript from Apple Events: Safari > Develop menu (turn on Settings > Advanced > Show features for web
 developers first), or Chrome > View > Developer.
 """
-import json, os, subprocess, sys, threading, time, urllib.request
+import json, os, re, subprocess, sys, threading, time, urllib.request
 from pathlib import Path
 
 import duo_watch as w
@@ -340,7 +340,8 @@ def _drive(tab, boot_js, phone, add_to_bag, test):
             s = f"WAIT stuck at: {s} - take over from here"
         if s != logged:
             w.log("checkout: " + s); logged = s
-            if not in_checkout and "Check Out" in s:
+            # past the bag: "clicked Check Out" can come and go between two reads, so match any later status too
+            if not in_checkout and re.search(r"Check Out|opening checkout|sign in|loading checkout|pickup|contact|billing|^DONE", s):
                 in_checkout = True; tell_phone("mac checkout")
         if s.startswith(("WAIT", "DONE")) and s != told:
             told = s
