@@ -120,7 +120,7 @@ __PREFILL__
       const block = b => { let e = b; for (let i = 0; i < 10 && e.parentElement && !/Carrier:/.test(e.textContent); i++) e = e.parentElement; return e.textContent; };
       const fits = (b, r) => b.textContent.includes(r.name) && block(b).includes(r.carrier);
       const inBag = [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")].filter(b => (DUO.readyCart || []).some(r => fits(b, r))).map(b => b.textContent);
-      if (!inBag.length && !/bag is empty/i.test(document.body.innerText)) return banner("setting the ready cart back up: reading the bag...");
+      if (!document.querySelector("button[data-autom=bag-item-remove-button]") && !/bag is empty/i.test(document.body.innerText)) return banner("setting the ready cart back up: reading the bag...");
       // after a dry run (cfg.test), the test phone comes out of the bag too; a real run never removes anything here
       // a dry run's test phone, or a Duo on the wrong carrier (left from before a FINANCING switch), comes out
       const stray = [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")]
