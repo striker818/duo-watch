@@ -239,6 +239,12 @@
     if (pop) return act("checkout_popup", () => pop.click(), 2000) ? say("clicked Check Out in the Apple Card pop-up") : say("opening checkout...");
     const b = vis(sel)[0];
     if (!b) return say("waiting for Check Out");
+    // Check Out tapped before Apple's page script takes over the button goes to Apple's raw checkout link and gets a
+    // 404 (2026-11-05: three taps 0-1s after the bag loaded all 404'd; the one that worked opened the Apple Card
+    // pop-up first, which only the page script does). Wait until the page has loaded plus a moment.
+    const nav = performance.getEntriesByType("navigation")[0];
+    const loadedFor = nav && nav.loadEventEnd > 0 ? performance.now() - nav.loadEventEnd : document.readyState === "complete" ? 9e9 : 0;
+    if (loadedFor < 1200) return say("waiting for the bag page to finish loading");
     return act("checkout", () => b.click()) ? say("clicked Check Out") : say("opening checkout...");
   }
   if (/\/checkout/.test(url)) {
