@@ -251,22 +251,6 @@
     const nav = performance.getEntriesByType("navigation")[0];
     const loadedFor = nav && nav.loadEventEnd > 0 ? performance.now() - nav.loadEventEnd : document.readyState === "complete" ? 9e9 : 0;
     if (loadedFor < 1200) return say("waiting for the bag page to finish loading");
-    // Paying in full on the phone: the bag's own "Check out with Apple Pay" skips the whole checkout (its sheet offers
-    // in-store pickup, checked 2026-11-05). Apple Pay only opens from a real tap, and that sheet is where the order is
-    // confirmed, so the script gets the bag ready, rings the button and stops; tapping Check Out instead still works
-    // (the steps below carry on from the checkout pages).
-    const ap = PHONE && !DUO.financing && vis("button[data-autom=checkout-with-apple-pay]")[0];
-    if (ap) {
-      if (!ap.__duoRung) {
-        ap.__duoRung = true;
-        ap.scrollIntoView({ block: "center", behavior: "instant" });
-        ap.style.outline = "6px solid #30d158"; ap.style.outlineOffset = "4px";
-        ap.addEventListener("click", () => { window.__duoExpress = true; }, { capture: true, once: true });
-      }
-      const bagStore = (vis("button[data-autom=bag-seemorestores-link]")[0] || { textContent: "" }).textContent.split(",")[0].replace(/^\s*Apple\s*/, "").trim();
-      const want = DUO.storeName || "the store in the alert";
-      return say("WAIT tap Check out with Apple Pay, pick up at " + want + (bagStore && DUO.storeName && !DUO.storeName.includes(bagStore) ? " (the bag shows " + bagStore + " - change it in the sheet)" : "") + ", then Face ID");
-    }
     return act("checkout", () => b.click()) ? say("clicked Check Out") : say("opening checkout...");
   }
   if (/\/checkout/.test(url)) {
