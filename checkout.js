@@ -48,9 +48,38 @@
     return say("reopening the bag...");
   }
 
+  // The last page: Review on the Mac (Place Your Order), or on the phone the single pickup + payment page that ends in
+  // "Continue with Apple Pay" (the Apple Pay sheet is where you confirm the order). Tick the carrier's terms, make
+  // sure the other ready-cart size is gone, then scroll the final button into view and ring it. Never clicked here.
+  function finish(btn, how) {
+    const pageText = text(document.body);
+    const stale = (DUO.dropItem || "").split("|").filter(Boolean).find(d => pageText.includes(d));
+    if (stale) return act("review_refresh", () => location.reload(), 6000)
+      ? say("the order still lists " + stale + " - refreshing") : say("waiting for " + stale + " to leave the order...");
+    const terms = [...document.querySelectorAll("input[type=checkbox]")]
+      .filter(c => !c.checked && !c.disabled && (seen(c) || seen(labelOf(c))) && /terms/i.test(c.id + " " + text(labelOf(c))));
+    if (terms.length)
+      return act("terms", () => labelOf(terms[0]).click(), 2000) ? say("accepted: " + text(labelOf(terms[0]))) : say("accepting terms...");
+    if (btn && !window.__duoScrolled) {
+      window.__duoScrolled = true;
+      btn.scrollIntoView({ block: "center", behavior: "instant" });
+      btn.style.outline = "6px solid #30d158"; btn.style.outlineOffset = "4px"; btn.style.borderRadius = "12px";
+    }
+    return say("DONE review the order and " + how);
+  }
+
   function next(step) {
-    const b = [document.getElementById("rs-checkout-continue-button-bottom")].find(seen) || byText("button", /^continue\b/i);
-    if (!b) return say(step + ": looking for Continue");
+    // Apple's own Continue (any rs-checkout-continue-button*), else a button named just "Continue" / "Continue to ...".
+    // Never "Continue with Apple Pay" (the phone shows one on the pickup contact page) or anything Apple Pay.
+    const notPay = e => !/apple\s*pay|continue with/i.test(text(e) + " " + (e.getAttribute("aria-label") || "") + " " + e.className);
+    const b = vis("button[id^=rs-checkout-continue-button]").filter(notPay)[0]
+      || vis("button").filter(notPay).find(e => /^continue( to .*)?$/i.test(text(e)));
+    if (!b) {
+      // phone: no Continue, just "Continue with Apple Pay" - that's the last page
+      const pay = vis("button, [role=button]").find(e => /^continue with/i.test(text(e)) || /apple\s*pay/i.test(e.getAttribute("aria-label") || ""));
+      if (pay) { const m = missing(); if (m.length) return say("WAIT fill in: " + m.join(", ")); return finish(pay, "tap Continue with Apple Pay, then confirm with Face ID"); }
+      return say(step + ": looking for Continue");
+    }
     if (/place|order|submit|pay now/i.test(text(b))) return say("DONE review the order and tap Place Your Order yourself");
     if (b.disabled || b.getAttribute("aria-disabled") === "true") return say(step + ": waiting for Continue to enable");
     // a form that just appeared can swallow the first Continue (seen on pickup contact: Apple spent ~9s, then stayed on
@@ -139,26 +168,7 @@
 
   if (!/^https?:/.test(url)) return "page loading...";   // Safari's new window is about:blank for a moment
   if (/\/shop\/404/.test(url) || /page not found/i.test(document.title)) return rescue("Apple showed a 404");
-  if (placeOrder()) {
-    // Review: tick the carrier's Terms & Conditions box(es) so the order is ready; Place Your Order stays yours
-    const terms = [...document.querySelectorAll("input[type=checkbox]")]
-      .filter(c => !c.checked && !c.disabled && (seen(c) || seen(labelOf(c))) && /terms/i.test(c.id + " " + text(labelOf(c))));
-    // ready cart: the other size should be gone; if Review still lists it, refresh rather than stop the checkout
-    const pageText = text(document.body);
-    const stale = (DUO.dropItem || "").split("|").filter(Boolean).find(d => pageText.includes(d));
-    if (stale) return act("review_refresh", () => location.reload(), 6000)
-      ? say("the order still lists " + stale + " - refreshing Review") : say("waiting for " + stale + " to leave the order...");
-    if (terms.length)
-      return act("terms", () => labelOf(terms[0]).click(), 2000) ? say("accepted: " + text(labelOf(terms[0]))) : say("accepting terms...");
-    // bring Place Your Order into view and ring it in green so it's the first thing you see (never clicked here)
-    const po = placeOrder();
-    if (po && !window.__duoScrolled) {
-      window.__duoScrolled = true;
-      po.scrollIntoView({ block: "center", behavior: "instant" });
-      po.style.outline = "6px solid #30d158"; po.style.outlineOffset = "4px"; po.style.borderRadius = "12px";
-    }
-    return say("DONE review the order and tap Place Your Order yourself");
-  }
+  if (placeOrder()) return finish(placeOrder(), "tap Place Your Order yourself");
   if (/\/shop\/signIn/i.test(url) || /^idmsa\./.test(location.hostname)) return say(  // idmsa: Apple Card checkout sign-in
     "WAIT sign in to your Apple Account - I'll carry on after that");
   if (/^preauth/.test(location.hostname)) {  // "Let's connect this new iPhone to T-Mobile": number, PIN, picture code

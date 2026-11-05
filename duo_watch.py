@@ -78,6 +78,27 @@ def start_checkout(hits, add_to_bag=True):
     with _checkout_lock:
         _start_checkout(hits, add_to_bag)
 
+def part_of(h):
+    return next(p for p, (l, _) in PARTS.items() if l == h[0])
+
+def choose(hits):
+    """The hit to go for: the ready cart's sizes first (fastest), then today's pickup, then 256GB before 512GB."""
+    order = list(PARTS)
+    return min(hits, key=lambda h: (part_of(h) not in READY_CART, "Today" not in h[2], order.index(part_of(h))))
+
+def drop_items(part):
+    """Ready-cart sizes to take out of the bag when `part` is the one in stock, as the bag names them."""
+    return "|".join("iPhone Duo " + PARTS[p][0].replace(" T-Mobile", "") for p in READY_CART if p != part)
+
+def phone_link(h):
+    """Phone alert link: with the ready cart, the bag (the phone userscript, phone_script.py, takes it from there);
+    without it, the buy page as before."""
+    if part_of(h) not in READY_CART:
+        return h[1]
+    from urllib.parse import quote
+    cfg = {"store": h[3], "storeName": h[4], "dropItem": drop_items(part_of(h)), "buyUrl": h[1]}
+    return BAG_URL + "#duo=" + quote(json.dumps(cfg, separators=(",", ":")), safe="")
+
 def _start_checkout(hits, add_to_bag):
     """Start checkout.py in the background on one hit: today's pickup first, then 256GB before 512GB.
     Skips if a checkout from the last 20 minutes is still running, so the bag only ever gets one phone."""
@@ -87,19 +108,15 @@ def _start_checkout(hits, add_to_bag):
             return log("checkout already running - not starting another")
         except (OSError, ValueError):
             pass
-    order = list(PARTS)
-    part_of = lambda h: next(p for p, (l, _) in PARTS.items() if l == h[0])
-    # the ready cart's size first (fastest), then today's pickup, then 256GB before 512GB
-    label, url, _, store, name = h = min(hits, key=lambda h: (part_of(h) not in READY_CART, "Today" not in h[2], order.index(part_of(h))))
+    label, url, _, store, name = h = choose(hits)
     env = dict(os.environ)
     if add_to_bag and READY_CART:
         if part_of(h) in READY_CART:
             env["DUO_BUY_URL"] = url; url = BAG_URL
         # the other ready-cart sizes come out of the bag, so only the in-stock one is ordered
         # ("iPhone Duo 256GB Star White", as the bag names it)
-        others = ["iPhone Duo " + PARTS[p][0].replace(" T-Mobile", "") for p in READY_CART if p != part_of(h)]
-        if others:
-            env["DUO_DROP_ITEM"] = "|".join(others)
+        if drop_items(part_of(h)):
+            env["DUO_DROP_ITEM"] = drop_items(part_of(h))
     args = [url, store, name] if add_to_bag else ["--no-bag", url]
     proc = subprocess.Popen([sys.executable, str(Path(__file__).with_name("checkout.py")), *args], env=env,
                             stdout=subprocess.DEVNULL, stderr=open(Path.home() / "duo_checkout.err", "a"),
@@ -128,11 +145,19 @@ def notify(hits, add_to_bag=True):
         # phone push: title says size + store, plus one button per in-stock size. Links use x-safari-https:// (iOS 17+)
         # so they open in Safari: faster than the Apple Store app, and Safari keeps the Apple Card + T-Mobile presets
         first = hits[0][2].split(" (")[0].replace(" Star White T-Mobile", "")       # "512GB @ Mall of America"
+        best = choose(hits)
         phone_body = ("\n".join(h[2].split(" - ")[0] for h in hits)
-                      + ("\nAt the Mac? It's checking out in Chrome - sign in when asked, then Place Order." if MAC else "")
-                      + "\nOn phone: opens Safari with Apple Card Monthly + T-Mobile set. Tap No AppleCare > Add to Bag > Pickup at that store")
-        actions = "; ".join(f"view, Buy {lbl.split()[0]}, x-safari-{u}, clear=true"
-                            for lbl, u in PARTS.values() if u in urls)
+                      + ("\nAt the Mac? It's checking out in Safari - sign in, then Place Your Order." if MAC else "")
+                      + ("\nOn phone: tap to open your bag - it removes the other size and checks out; Face ID, then Place Your Order."
+                         if part_of(best) in READY_CART else
+                         "\nOn phone: opens Safari with Apple Card Monthly + T-Mobile set. Tap No AppleCare > Add to Bag > Pickup at that store"))
+        # one button per in-stock size (best first); each opens the bag set up for that size and store
+        firsts = {}
+        for h in sorted(hits, key=lambda h: h is not best):
+            firsts.setdefault(part_of(h), h)
+        actions = "; ".join(f"view, Check out {h[0].split()[0]} @ {h[4]}, x-safari-{phone_link(h)}, clear=true"
+                            for h in list(firsts.values())[:3])
+        BUY_URL = phone_link(best)
         try:
             with urllib.request.urlopen(urllib.request.Request(
                     f"https://ntfy.sh/{NTFY_TOPIC}", data=phone_body.encode(),
