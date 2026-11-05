@@ -50,10 +50,13 @@ TEMPLATE = """// ==UserScript==
   }
   if (!cfg || Date.now() - cfg.t > __LIFE__ * 60000) return;   // only right after an alert, never while you browse
   // Only the tab the alert opened acts. Tabs left open from a test or a failed run used to pick up the new alert too
-  // and tap Check Out on the same bag (Apple 404s a second checkout of one bag). window.name stays with a tab
-  // across apple.com pages and is "duo-<time the alert was opened>" only in the alert's tab.
+  // and tap Check Out on the same bag (Apple 404s a second checkout of one bag). The alert's tab is tagged
+  // window.name = "duo-<time the alert was opened>"; a tab tagged for an older alert stays out. Safari empties
+  // window.name when the tab moves to another apple.com site (www > secure*.store > idmsa), so an empty name is
+  // allowed and re-tagged (2026-11-05: requiring the tag stopped the script on every checkout page).
   const RUN = "duo-" + cfg.t;
-  if (window.name !== RUN) return;
+  if (window.name && window.name !== RUN) return;
+  window.name = RUN;
   var DUO = Object.assign({}, BASE, cfg);
   const save = () => GM.setValue("duo", JSON.stringify(cfg));
   DUO.rescues = { get: () => cfg.rescues || 0, set: n => { cfg.rescues = n; return save(); } };   // survives page loads
