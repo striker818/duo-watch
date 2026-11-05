@@ -118,6 +118,13 @@ __PREFILL__
     if (/\/shop\/bag/.test(location.pathname)) {
       const inBag = [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")].map(b => b.textContent);
       if (!inBag.length && !/bag is empty/i.test(document.body.innerText)) return banner("setting the ready cart back up: reading the bag...");
+      // after a dry run (cfg.test), the test phone comes out of the bag too; a real run never removes anything here
+      const stray = cfg.test ? [...document.querySelectorAll("button[data-autom=bag-item-remove-button]")]
+        .filter(b => !(DUO.readyCart || []).some(r => b.textContent.includes(r.name))) : [];
+      if (stray.length) {
+        if (Date.now() - lastGo > 2500) { lastGo = Date.now(); stray[0].click(); }
+        return banner("dry run over: taking " + stray[0].textContent.replace(/^\s*Remove\s*/, "").trim() + " out of the bag");
+      }
       const missing = (DUO.readyCart || []).filter(r => !inBag.some(t => t.includes(r.name)));
       if (!missing.length) return banner("DONE ready cart is back in the bag for the next drop", "#248a3d");
       if ((cfg.restoreTries || 0) >= 6) return banner("DONE couldn't put " + missing.map(r => r.name).join(" + ") + " back in the bag - add it by hand", "#d70015");
@@ -157,6 +164,13 @@ __PREFILL__
     }
     else if (!snapped && Date.now() - since > 8000) { snapped = true; report("stuck " + snapshot()); }
     if (s === "NEED_PREFILL") window.__duoPrefillRun();
+    // dry run reached the end: leave the final page up for 15s, then put the ready cart back
+    if (cfg.test && !cfg.restore && typeof s === "string" && s.startsWith("DONE")) {
+      if (s !== lastS) { lastS = s; since = Date.now(); report("status " + location.hostname + location.pathname + " | " + s); }
+      if (Date.now() - since < 15000) return;
+      cfg.restore = true; cfg.restoreTries = 0; cfg.restoreAt = Date.now(); await save();
+      return report("status " + location.hostname + location.pathname + " | dry run done - setting the ready cart back up");
+    }
     if (typeof s === "string" && s.startsWith("DONE")) {
       clearInterval(loop);
       await GM.setValue("duo", "null");   // finished: stop acting until the next alert
