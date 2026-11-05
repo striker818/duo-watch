@@ -43,12 +43,17 @@ TEMPLATE = """// ==UserScript==
   const m = location.hash.match(/duo=([^&]+)/);
   if (m) {
     try { cfg = JSON.parse(decodeURIComponent(m[1])); } catch (e) { cfg = null; }
-    if (cfg) { cfg.t = Date.now(); await GM.setValue("duo", JSON.stringify(cfg)); }
+    if (cfg) { cfg.t = Date.now(); window.name = "duo-" + cfg.t; await GM.setValue("duo", JSON.stringify(cfg)); }
     history.replaceState(null, "", location.pathname + location.search);
   } else {
     try { cfg = JSON.parse(await GM.getValue("duo", "null")); } catch (e) { cfg = null; }
   }
   if (!cfg || Date.now() - cfg.t > __LIFE__ * 60000) return;   // only right after an alert, never while you browse
+  // Only the tab the alert opened acts. Tabs left open from a test or a failed run used to pick up the new alert too
+  // and tap Check Out on the same bag (Apple 404s a second checkout of one bag). window.name stays with a tab
+  // across apple.com pages and is "duo-<time the alert was opened>" only in the alert's tab.
+  const RUN = "duo-" + cfg.t;
+  if (window.name !== RUN) return;
   var DUO = Object.assign({}, BASE, cfg);
   const save = () => GM.setValue("duo", JSON.stringify(cfg));
   DUO.rescues = { get: () => cfg.rescues || 0, set: n => { cfg.rescues = n; return save(); } };   // survives page loads
@@ -96,8 +101,20 @@ __PREFILL__
     };
     document.body.appendChild(b);
   };
-  let lastS = "", since = Date.now(), snapped = false;
+  let lastS = "", since = Date.now(), snapped = false, lastCheck = 0;
   const loop = setInterval(async () => {
+    // a newer alert opened in another tab (or this run finished elsewhere): this tab stops for good
+    if (Date.now() - lastCheck > 1000) {
+      lastCheck = Date.now();
+      let now = null;
+      try { now = JSON.parse(await GM.getValue("duo", "null")); } catch (e) {}
+      if (!now || now.t !== cfg.t) {
+        clearInterval(loop); takeoverButton(false);
+        const b = document.getElementById("duo-banner");
+        if (b) { b.style.background = "#6e6e73"; b.textContent = "Duo checkout: stopped - a newer one started in another tab. You can close this tab."; }
+        return report("status " + location.hostname + location.pathname + " | stopped: newer alert opened in another tab");
+      }
+    }
     let s;
     try { s = step(); } catch (e) { s = "script error: " + e.message; }
     takeoverButton(typeof s === "string" && s.startsWith("WAIT the Mac"));
