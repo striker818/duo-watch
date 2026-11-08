@@ -14,6 +14,7 @@ Your ZIP and pickup person go into that file (from local.env), never into the al
 import json, os
 from pathlib import Path
 
+import time
 import duo_watch as w   # loads local.env
 
 HERE = Path(__file__).parent
@@ -81,7 +82,7 @@ __PREFILL__
   };
   // progress reports to the Mac (a private ntfy topic only the Mac reads): status changes, plus a snapshot of the
   // page's controls if a step sits still for 8s. Field values are never sent, only whether they're filled.
-  const report = msg => { try { GM.xmlHttpRequest({ method: "POST", url: "https://ntfy.sh/" + LOG_TOPIC, data: msg }); } catch (e) {} };
+  const report = msg => { try { GM.xmlHttpRequest({ method: "POST", url: "https://ntfy.sh/" + LOG_TOPIC, data: "[" + __BUILD__ + "] " + msg }); } catch (e) {} };   // build stamp: shows which copy the phone runs (iCloud can lag)
   const snapshot = () => {
     const seen = el => !!el && el.getClientRects().length > 0;
     const t = el => (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
@@ -190,7 +191,7 @@ def build():
             # sizes to keep in the bag between drops, as the bag names them, and their buy pages
             "readyCart": [{"name": "iPhone Duo " + w.PARTS[p][0].replace(" Unlocked", ""), "url": w.PARTS[p][1],
                            "carrier": "T-Mobile" if w.FINANCING else "any carrier"} for p in w.READY_CART]}
-    src = (TEMPLATE.replace("__BASE__", json.dumps(base)).replace("__LOG__", json.dumps(w.NTFY_TOPIC + "-phonelog")).replace("__LIFE__", str(LIFETIME_MIN))
+    src = (TEMPLATE.replace("__BASE__", json.dumps(base)).replace("__LOG__", json.dumps(w.NTFY_TOPIC + "-phonelog")).replace("__LIFE__", str(LIFETIME_MIN)).replace("__BUILD__", json.dumps(time.strftime("%m-%d %H:%M")))
            .replace("__MACLOG__", json.dumps(w.NTFY_TOPIC + "-maclog"))
            .replace("__STEP__", (HERE / "checkout.js").read_text().rstrip().rstrip(";"))
            .replace("__PREFILL__", (HERE / "prefill.js").read_text()))
