@@ -91,6 +91,11 @@
     };
     const go = bag && !bag.disabled ? bag : proceed;
     for (let i = 0; i < 40 && !formReady(go); i++) await sleep(75);   // up to ~3s, usually a few hundred ms
+    // Add to Bag clicked before Apple's page script has taken over posts the raw form and gets a 404
+    // (2026-11-08 phone: every click ~1s after the page opened went to a 404 at ...&step=select&atbtoken=...).
+    // Same as Check Out on the bag: wait until the page has finished loading plus a moment.
+    const loadedFor = () => { const n = performance.getEntriesByType("navigation")[0]; return n && n.loadEventEnd > 0 ? performance.now() - n.loadEventEnd : document.readyState === "complete" ? 9e9 : 0; };
+    for (let i = 0; i < 100 && loadedFor() < 1200; i++) { status("waiting for the page to finish loading before Add to Bag"); await sleep(100); }
     if (bag && !bag.disabled) { status("adding to bag - checkout continues on its own", "#248a3d"); bag.click(); }
     else if (proceed && !proceed.disabled) { status("continuing to T-Mobile", "#248a3d"); proceed.click(); }
     else throw new Error("neither Add to Bag nor Continue is enabled");
