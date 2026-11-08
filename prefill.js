@@ -96,6 +96,9 @@
     // Same as Check Out on the bag: wait until the page has finished loading plus a moment.
     const loadedFor = () => { const n = performance.getEntriesByType("navigation")[0]; return n && n.loadEventEnd > 0 ? performance.now() - n.loadEventEnd : document.readyState === "complete" ? 9e9 : 0; };
     for (let i = 0; i < 100 && loadedFor() < 1200; i++) { status("waiting for the page to finish loading before Add to Bag"); await sleep(100); }
+    // Apple redraws the buttons as the page finishes loading; a button found before the wait is a dead copy and
+    // clicking it does nothing (2026-11-08 phone: "adding to bag" logged, nothing added). Find it again now.
+    bag = shown("button[data-autom=add-to-cart]"); proceed = shown("button[data-autom=proceed]");
     if (bag && !bag.disabled) { status("adding to bag - checkout continues on its own", "#248a3d"); bag.click(); }
     else if (proceed && !proceed.disabled) { status("continuing to T-Mobile", "#248a3d"); proceed.click(); }
     else throw new Error("neither Add to Bag nor Continue is enabled");

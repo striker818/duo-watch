@@ -209,6 +209,15 @@
   if (/\/shop\/buy-iphone\//.test(url)) {  // prefill.js does this page; after Add to Bag, follow a Review Bag link if one shows
     const bag = window.__duoPrefill && /^adding/.test(window.__duoPrefill) && byText("a, button", /^(review|view|go to) bag/i);
     if (bag && act("reviewbag", () => bag.click())) return "clicked Review Bag";
+    // Add to Bag clicked but nothing happened (no Review Bag, no new page): click it again, at most twice, 4s apart
+    const atb = !bag && window.__duoPrefill && /^adding/.test(window.__duoPrefill) && vis("button[data-autom=add-to-cart]").find(e => !e.disabled && e.getAttribute("aria-busy") !== "true");
+    if (atb) {
+      window.__duoAddAt = window.__duoAddAt || Date.now();
+      window.__duoAddTries = window.__duoAddTries || 0;
+      if (Date.now() - window.__duoAddAt > 4000 * (window.__duoAddTries + 1) && window.__duoAddTries < 2) {
+        window.__duoAddTries++; atb.click(); return "Add to Bag didn't take - clicked it again (" + window.__duoAddTries + ")";
+      }
+    }
     return window.__duoPrefill ? "prefill: " + window.__duoPrefill : "NEED_PREFILL";
   }
   if (/\/shop\/product\//.test(url)) {     // --test runs on an accessory page
