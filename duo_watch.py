@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """iPhone Duo stock agent - checks Apple Store pickup near you, alerts you, and on the Mac drives checkout
 (checkout.py) up to the point it needs you.
-Config: iPhone Duo (unlocked, paid in full, no AppleCare) Star White 256GB (MK1E4LL/A) + 512GB (MK1G4LL/A), pickup near DUO_ZIP.
+Config: iPhone Duo (unlocked, paid in full, no AppleCare) 256GB + 512GB in Star White (MK1E4LL/A, MK1G4LL/A) and
+Night Sky (MK1F4LL/A, MK1H4LL/A), pickup near DUO_ZIP.
 """
 import json, os, smtplib, subprocess, sys, threading, time, urllib.request
 from email.message import EmailMessage
@@ -15,8 +16,10 @@ PRESET = "?purchaseOption=fullPrice&cppart=UNLOCKED/US"
 FINANCING = False   # True = Apple Card Monthly + T-Mobile (needs the old PRESET and -t-mobile pages); prefill.js and checkout.js follow it
 PARTS = {  # part number -> (label, buy page)
     "MK1E4LL/A": ("256GB Star White Unlocked", BASE + "256gb-star-white-unlocked" + PRESET),
+    "MK1F4LL/A": ("256GB Night Sky Unlocked", BASE + "256gb-night-sky-unlocked" + PRESET),
     "MK1G4LL/A": ("512GB Star White Unlocked", BASE + "512gb-star-white-unlocked" + PRESET),
-}
+    "MK1H4LL/A": ("512GB Night Sky Unlocked", BASE + "512gb-night-sky-unlocked" + PRESET),
+}  # order = preference when several are in stock: 256GB before 512GB, Star White before Night Sky
 # personal settings (ntfy topic, email, gmail app password) live in local.env next to this file, which git ignores
 _local = Path(__file__).with_name("local.env")
 if _local.exists():
@@ -84,7 +87,7 @@ def part_of(h):
     return next(p for p, (l, _) in PARTS.items() if l == h[0])
 
 def choose(hits):
-    """The hit to go for: the ready cart's sizes first (fastest), then today's pickup, then 256GB before 512GB."""
+    """The hit to go for: the ready cart's phones first (fastest), then today's pickup, then PARTS order."""
     order = list(PARTS)
     return min(hits, key=lambda h: (part_of(h) not in READY_CART, "Today" not in h[2], order.index(part_of(h))))
 
@@ -146,18 +149,18 @@ def notify(hits, add_to_bag=True):
     if NTFY_TOPIC:
         # phone push: title says size + store, plus one button per in-stock size. Links use x-safari-https:// (iOS 17+)
         # so they open in Safari: faster than the Apple Store app, and Safari keeps the pay-in-full + unlocked presets
-        first = hits[0][2].split(" (")[0].replace(" Star White Unlocked", "")       # "512GB @ Mall of America"
+        first = hits[0][2].split(" (")[0].replace(" Unlocked", "")       # "512GB Night Sky @ Mall of America"
         best = choose(hits)
         phone_body = ("\n".join(h[2].split(" - ")[0] for h in hits)
                       + ("\nAt the Mac? It's checking out in Safari - sign in, then Place Your Order." if MAC else "")
-                      + ("\nOn phone: tap to open your bag - it removes the other size and checks out; Face ID, then Place Your Order."
+                      + ("\nOn phone: tap to open your bag - it removes the other phones and checks out; Face ID, then Place Your Order."
                          if part_of(best) in READY_CART else
                          "\nOn phone: opens Safari with Buy + unlocked set. Tap No AppleCare > Add to Bag > Pickup at that store"))
         # one button per in-stock size (best first); each opens the bag set up for that size and store
         firsts = {}
         for h in sorted(hits, key=lambda h: h is not best):
             firsts.setdefault(part_of(h), h)
-        actions = "; ".join(f"view, Check out {h[0].split()[0]} @ {h[4]}, x-safari-{phone_link(h)}, clear=true"
+        actions = "; ".join(f"view, Check out {h[0].replace(' Unlocked', '')} @ {h[4]}, x-safari-{phone_link(h)}, clear=true"
                             for h in list(firsts.values())[:3])
         BUY_URL = phone_link(best)
         try:
