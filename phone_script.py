@@ -118,8 +118,24 @@ __PREFILL__
   };
   let lastGo = 0;
   const go = async url => { if (Date.now() - lastGo < 6000) return; lastGo = Date.now(); cfg.restoreTries = (cfg.restoreTries || 0) + 1; await save(); location.href = url; };
+  // a bag line at quantity 2+ (a double Add to Bag) would order 2: put it back to 1. Returns true while fixing one.
+  const fixQty = () => {
+    const q = [...document.querySelectorAll("select")].find(x => /itemQuantity/.test(x.name || x.id) && +x.value > 1);
+    if (!q) return false;
+    if (Date.now() - (window.__duoQtyAt || 0) > 4000) {
+      window.__duoQtyAt = Date.now();
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(q, "1");
+      q.dispatchEvent(new Event("input", { bubbles: true })); q.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    return true;
+  };
   const restoreStep = () => {
     if (/\/shop\/bag/.test(location.pathname)) {
+      // the bag draws its items over a moment; reading it early misses some and adds them twice (2026-11-10)
+      const nav = performance.getEntriesByType("navigation")[0];
+      const loadedFor = nav && nav.loadEventEnd > 0 ? performance.now() - nav.loadEventEnd : document.readyState === "complete" ? 9e9 : 0;
+      if (loadedFor < 2000) return banner("setting the ready cart back up: waiting for the bag to load...");
+      if (fixQty()) return banner("setting the ready cart back up: putting a doubled phone back to quantity 1");
       // a bag item's name is the same for every carrier; its "Carrier:" line tells T-Mobile from unlocked
       const block = b => { let e = b; for (let i = 0; i < 10 && e.parentElement && !/Carrier:/.test(e.textContent); i++) e = e.parentElement; return e.textContent; };
       const fits = (b, r) => b.textContent.includes(r.name) && block(b).includes(r.carrier);

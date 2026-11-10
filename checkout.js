@@ -246,6 +246,14 @@
       return act("drop", () => extra[0].click(), 1500) ? say("removed " + text(extra[0]).replace(/^Remove/, "") + " from the bag (not the size in stock)") : say("removing the other size...");
     // leftovers in the bag would go into the same order; let you decide rather than check out with them
     const items = removes.length - extra.length;
+    // a ready-cart line at quantity 2+ would order 2 phones: set it to 1 before checking out
+    const q2 = [...document.querySelectorAll("select")].find(x => /itemQuantity/.test(x.name || x.id) && +x.value > 1);
+    if (q2) {
+      if (act("qty1", () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(q2, "1");
+        q2.dispatchEvent(new Event("input", { bubbles: true })); q2.dispatchEvent(new Event("change", { bubbles: true })); }, 4000))
+        return say("set quantity back to 1");
+      return say("waiting for the quantity to update...");
+    }
     if (items > 1) return say("WAIT the bag has " + items + " items - remove all but the phone, then I'll check out");
     // with Apple Card Monthly the button is bag-checkout-button, and the first click opens an Apple Card pop-up that
     // has its own copy of it; click the pop-up's one when it's open, or we just keep reopening the pop-up
