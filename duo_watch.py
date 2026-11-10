@@ -185,7 +185,7 @@ def notify(hits, add_to_bag=True):
         try:
             m = EmailMessage(); m["Subject"] = "iPhone Duo in stock - go buy"
             m["From"] = GMAIL_USER; m["To"] = EMAIL_TO; m.set_content(body)
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as s:   # no timeout = a slow Gmail froze the whole loop (2026-11-10)
                 s.login(GMAIL_USER, GMAIL_APP_PW); s.send_message(m)
         except Exception as e:
             log(f"email failed: {e}")
