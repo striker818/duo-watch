@@ -271,6 +271,11 @@
     // carrier-connected device at a time"). If it's the only item, the bag empties and we fall back to the buy page.
     const drops = (DUO.dropItem || "").split("|").filter(Boolean);
     const extra = removes.filter(b => drops.some(d => text(b).includes(d)));
+    // Remove tapped before Apple's page script has taken over the bag posts the raw form and gets a 404, same as Check Out
+    // (2026-11-10 phone: three removes ~0.5s after the bag opened all went to /shop/404). Wait for load + a moment.
+    const navB = performance.getEntriesByType("navigation")[0];
+    const bagLoadedFor = navB && navB.loadEventEnd > 0 ? performance.now() - navB.loadEventEnd : document.readyState === "complete" ? 9e9 : 0;
+    if (extra.length && bagLoadedFor < 1200) return say("waiting for the bag page to finish loading before removing the other phones");
     if (extra.length)
       return act("drop", () => extra[0].click(), 1500) ? say("removed " + text(extra[0]).replace(/^Remove/, "") + " from the bag (not the size in stock)") : say("removing the other size...");
     // leftovers in the bag would go into the same order; let you decide rather than check out with them
