@@ -41,6 +41,8 @@ BLOCKED = STATE.with_name(STATE.name + ".blocked")   # touched when Apple rate-l
 BACKOFF = 600   # seconds to pause after a block; a test block (polling every 3s) lasted 25+ min and checking
                 # during it may extend it
 MAC = sys.platform == "darwin"                           # False on the GitHub Actions runner
+# DUO_MAC_CHECKOUT=0 in local.env: the Mac still checks and alerts, but never opens a checkout (the phone does it)
+MAC_CHECKOUT = MAC and os.environ.get("DUO_MAC_CHECKOUT", "1") != "0"
 PERIOD = 60     # seconds between checks per tracker (36s and 48s still got blocked every 1-2h); the Mac checks on clock
                 # slot 0 and the cloud on slot 30, so together they check every 30s
 
@@ -77,9 +79,15 @@ CHECKOUT_PID = Path.home() / ".duo_checkout.pid"
 # page, the option picking and Add to Bag - the step Apple sometimes answers with a 404 at drop time.
 READY_CART = [p.strip() for p in os.environ.get("DUO_READY_CART", "").split(",") if p.strip() in PARTS]  # one or both sizes
 BAG_URL = "https://www.apple.com/shop/bag"
+# Phone 2 (a second iPhone on another Apple Account, see phone_script.py PHONE2): its own alert topic <topic>-p2,
+# links keyed #duo2= so only its script acts, and its own ready cart (defaults to the same phones as phone 1)
+P2_KEY = "duo2"
+P2_READY_CART = [p.strip() for p in os.environ.get("DUO2_READY_CART", "").split(",") if p.strip() in PARTS] or READY_CART
 _checkout_lock = threading.Lock()   # the cloud listener and the Mac's own check can both start one
 
 def start_checkout(hits, add_to_bag=True):
+    if not MAC_CHECKOUT:
+        return log("Mac checkout is off (DUO_MAC_CHECKOUT=0) - checkout is on the phone")
     with _checkout_lock:
         _start_checkout(hits, add_to_bag)
 
@@ -91,18 +99,19 @@ def choose(hits):
     order = list(PARTS)
     return min(hits, key=lambda h: (part_of(h) not in READY_CART, "Today" not in h[2], order.index(part_of(h))))
 
-def drop_items(part):
+def drop_items(part, cart=None):
     """Ready-cart sizes to take out of the bag when `part` is the one in stock, as the bag names them."""
-    return "|".join("iPhone Duo " + PARTS[p][0].replace(" Unlocked", "") for p in READY_CART if p != part)
+    return "|".join("iPhone Duo " + PARTS[p][0].replace(" Unlocked", "") for p in (READY_CART if cart is None else cart) if p != part)
 
-def phone_link(h):
+def phone_link(h, phone2=False):
     """Phone alert link: with the ready cart, the bag (the phone userscript, phone_script.py, takes it from there);
     without it, the buy page as before."""
-    if part_of(h) not in READY_CART:
+    cart, key = (P2_READY_CART, P2_KEY) if phone2 else (READY_CART, "duo")
+    if part_of(h) not in cart:
         return h[1]
     from urllib.parse import quote
-    cfg = {"store": h[3], "storeName": h[4], "dropItem": drop_items(part_of(h)), "buyUrl": h[1]}
-    return BAG_URL + "#duo=" + quote(json.dumps(cfg, separators=(",", ":")), safe="")
+    cfg = {"store": h[3], "storeName": h[4], "dropItem": drop_items(part_of(h), cart), "buyUrl": h[1]}
+    return BAG_URL + f"#{key}=" + quote(json.dumps(cfg, separators=(",", ":")), safe="")
 
 def _start_checkout(hits, add_to_bag):
     """Start checkout.py in the background on one hit: today's pickup first, then 256GB before 512GB.
@@ -152,7 +161,7 @@ def notify(hits, add_to_bag=True):
         first = hits[0][2].split(" (")[0].replace(" Unlocked", "")       # "512GB Night Sky @ Mall of America"
         best = choose(hits)
         phone_body = ("\n".join(h[2].split(" - ")[0] for h in hits)
-                      + ("\nAt the Mac? It's checking out in Safari - sign in, then Place Your Order." if MAC else "")
+                      + ("\nAt the Mac? It's checking out in Safari - sign in, then Place Your Order." if MAC_CHECKOUT else "")
                       + ("\nOn phone: tap to open your bag - it removes the other phones and checks out; Face ID, then Place Your Order."
                          if part_of(best) in READY_CART else
                          "\nOn phone: opens Safari with Buy + unlocked set. Tap No AppleCare > Add to Bag > Pickup at that store"))
@@ -171,6 +180,7 @@ def notify(hits, add_to_bag=True):
                 log(f"ntfy sent: HTTP {r.status}")
         except Exception as e:
             log(f"ntfy failed: {e}")
+        notify_phone2(hits, first)
     if GMAIL_USER and GMAIL_APP_PW:
         try:
             m = EmailMessage(); m["Subject"] = "iPhone Duo in stock - go buy"
@@ -179,6 +189,36 @@ def notify(hits, add_to_bag=True):
                 s.login(GMAIL_USER, GMAIL_APP_PW); s.send_message(m)
         except Exception as e:
             log(f"email failed: {e}")
+
+def notify_phone2(hits, first):
+    """Phone 2's own push on <topic>-p2: its links open its own bag (#duo2=) and never involve the Mac or phone 1."""
+    best = sorted(hits, key=lambda h: (part_of(h) not in P2_READY_CART, "Today" not in h[2], list(PARTS).index(part_of(h))))[0]
+    firsts = {}
+    for h in sorted(hits, key=lambda h: h is not best):
+        firsts.setdefault(part_of(h), h)
+    actions = "; ".join(f"view, Check out {h[0].replace(' Unlocked', '')} @ {h[4]}, x-safari-{phone_link(h, True)}, clear=true"
+                        for h in list(firsts.values())[:3])
+    body = ("\n".join(h[2].split(" - ")[0] for h in hits)
+            + ("\nTap to open this phone's bag - it removes the other phones and checks out; Face ID, then Place Your Order."
+               if part_of(best) in P2_READY_CART else
+               "\nOpens Safari with Buy + unlocked set. Tap No AppleCare > Add to Bag > Pickup at that store"))
+    try:
+        with urllib.request.urlopen(urllib.request.Request(
+                f"https://ntfy.sh/{NTFY_TOPIC}-p2", data=body.encode(),
+                headers={"Title": f"Duo in stock: {first}" + ("" if MAC else " [cloud]"), "Priority": "urgent",
+                         "Tags": "rotating_light", "Click": "x-safari-" + phone_link(best, True), "Actions": actions}), timeout=15) as r:
+            log(f"ntfy phone 2 sent: HTTP {r.status}")
+    except Exception as e:
+        log(f"ntfy phone 2 failed: {e}")
+
+def phone2_setup():
+    """Push phone 2 a link that fills its bag with its ready cart (the same restore step a failed run uses)."""
+    from urllib.parse import quote
+    link = BAG_URL + f"#{P2_KEY}=" + quote(json.dumps({"restore": True}, separators=(",", ":")), safe="")
+    urllib.request.urlopen(urllib.request.Request(
+        f"https://ntfy.sh/{NTFY_TOPIC}-p2", data=b"Tap to put this phone's ready cart in its bag (signed in to its own Apple Account).",
+        headers={"Title": "Duo phone 2: set up the ready cart", "Click": "x-safari-" + link}), timeout=15)
+    log("phone 2 ready-cart setup link sent")
 
 def mac_notice(title, msg, sound="Basso"):
     subprocess.run(["osascript", "-e", f'on run argv\ndisplay notification (item 1 of argv) with title (item 2 of argv) sound name "{sound}"\nend run', msg, title])
@@ -291,6 +331,8 @@ def main():
 if __name__ == "__main__":
     if "--test-alert" in sys.argv:
         lbl, url = PARTS["MK1G4LL/A"]; notify([(lbl, url, f"TEST - {lbl} @ Rosedale (Roseville, 5 mi)", "R022", "Rosedale")], add_to_bag=False); sys.exit()
+    if "--phone2-setup" in sys.argv:  # push phone 2 a link that loads its ready cart into its bag
+        phone2_setup(); sys.exit()
     if "--history" in sys.argv:
         history(); sys.exit()
     if "--drops" in sys.argv:  # when drops happen, by hour and weekday (cloud + Mac records merged)

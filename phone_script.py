@@ -10,6 +10,7 @@ The file is written to iCloud Drive/Userscripts, so it appears on the phone; set
 Your ZIP and pickup person go into that file (from local.env), never into the alert link or this repo.
 
   /usr/bin/python3 phone_script.py          # (re)build after checkout.js or local.env changes
+  /usr/bin/python3 phone_script.py --phone2 # the second phone's copy (its own Apple Account), see PHONE2 below
 """
 import json, os
 from pathlib import Path
@@ -22,7 +23,7 @@ OUT = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs/Userscripts/du
 LIFETIME_MIN = 20
 
 TEMPLATE = """// ==UserScript==
-// @name         Duo checkout
+// @name         __NAME__
 // @description  From a Duo alert link: remove the other size, check out, pick the store, stop at Place Your Order.
 // @match        https://www.apple.com/shop/*
 // @match        https://*.store.apple.com/*
@@ -37,11 +38,11 @@ TEMPLATE = """// ==UserScript==
 (async () => {
   const BASE = __BASE__;
   const LOG_TOPIC = __LOG__;
-  const MAC_TOPIC = __MACLOG__;
+  const MAC_TOPIC = __MACLOG__;   // null on phone 2: its own Apple Account and bag, so it never waits for the Mac
   // the alert link carries #duo=<json>: which store, which bag item to drop. Remember it across apple.com pages
   // (they're different sites, so page storage won't carry over; the extension's storage does).
   let cfg = null;
-  const m = location.hash.match(/duo=([^&]+)/);
+  const m = location.hash.match(/__KEY__=([^&]+)/);
   if (m) {
     try { cfg = JSON.parse(decodeURIComponent(m[1])); } catch (e) { cfg = null; }
     if (cfg) { cfg.t = Date.now(); window.name = "duo-" + cfg.t; await GM.setValue("duo", JSON.stringify(cfg)); }
@@ -71,8 +72,10 @@ TEMPLATE = """// ==UserScript==
     },
     onerror: () => { if (DUO.macBusy === undefined) DUO.macBusy = false; },   // can't tell: don't hold the phone up
     ontimeout: () => { if (DUO.macBusy === undefined) DUO.macBusy = false; }, timeout: 3000 });
-  macPoll(); setInterval(macPoll, 2000);
-  setTimeout(() => { if (DUO.macBusy === undefined) DUO.macBusy = false; }, 3000);
+  if (MAC_TOPIC) {
+    macPoll(); setInterval(macPoll, 2000);
+    setTimeout(() => { if (DUO.macBusy === undefined) DUO.macBusy = false; }, 3000);
+  } else DUO.macBusy = false;
   const step = () => (
 __STEP__
   );
@@ -185,19 +188,34 @@ __PREFILL__
 """
 
 
-def build():
-    base = {"device": "phone", "zip": w.ZIP, "phone": os.environ.get("DUO_TMOBILE_NUMBER", ""), "financing": w.FINANCING,
-            "pickup": {k: os.environ.get("DUO_PICKUP_" + k.upper(), "") for k in ("first", "last", "email", "phone")},
+# PHONE2: a second iPhone on a different Apple Account (Apple allows 2 Duos per customer, so a second account means
+# more phones). It is kept fully apart from the Mac and phone 1: its own alert topic (<topic>-p2, built by
+# duo_watch.notify), its own link key (#duo2=, which phone 1's script ignores and vice versa), its own log topic
+# (<topic>-phone2log, which the Mac never reads, so it can't trigger the Mac/phone-1 handover), no waiting for the Mac,
+# and its own pickup person (DUO2_PICKUP_*, empty = whoever owns that account) and ready cart (DUO2_READY_CART).
+# Its file goes to iCloud Drive/Userscripts-phone2: share that folder with phone 2's Apple Account and point phone 2's
+# Userscripts app at it. Never put it in phone 1's Userscripts folder: both scripts would then run in one Safari.
+OUT2 = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs/Userscripts-phone2/duo-checkout-phone2.user.js"
+
+
+def build(phone2=False):
+    pre, cart = ("DUO2_", w.P2_READY_CART) if phone2 else ("DUO_", w.READY_CART)
+    base = {"device": "phone", "zip": w.ZIP, "phone": os.environ.get(pre + "TMOBILE_NUMBER", ""), "financing": w.FINANCING,
+            "pickup": {k: os.environ.get(pre + "PICKUP_" + k.upper(), "") for k in ("first", "last", "email", "phone")},
             # sizes to keep in the bag between drops, as the bag names them, and their buy pages
             "readyCart": [{"name": "iPhone Duo " + w.PARTS[p][0].replace(" Unlocked", ""), "url": w.PARTS[p][1],
-                           "carrier": "T-Mobile" if w.FINANCING else "any carrier"} for p in w.READY_CART]}
-    src = (TEMPLATE.replace("__BASE__", json.dumps(base)).replace("__LOG__", json.dumps(w.NTFY_TOPIC + "-phonelog")).replace("__LIFE__", str(LIFETIME_MIN)).replace("__BUILD__", json.dumps(time.strftime("%m-%d %H:%M")))
-           .replace("__MACLOG__", json.dumps(w.NTFY_TOPIC + "-maclog"))
+                           "carrier": "T-Mobile" if w.FINANCING else "any carrier"} for p in cart]}
+    src = (TEMPLATE.replace("__BASE__", json.dumps(base)).replace("__LIFE__", str(LIFETIME_MIN)).replace("__BUILD__", json.dumps(("P2 " if phone2 else "") + time.strftime("%m-%d %H:%M")))
+           .replace("__LOG__", json.dumps(w.NTFY_TOPIC + ("-phone2log" if phone2 else "-phonelog")))
+           .replace("__MACLOG__", "null" if phone2 else json.dumps(w.NTFY_TOPIC + "-maclog"))
+           .replace("__NAME__", "Duo checkout (phone 2)" if phone2 else "Duo checkout")
+           .replace("__KEY__", w.P2_KEY if phone2 else "duo")
            .replace("__STEP__", (HERE / "checkout.js").read_text().rstrip().rstrip(";"))
            .replace("__PREFILL__", (HERE / "prefill.js").read_text()))
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(src)
-    return OUT
+    out = OUT2 if phone2 else OUT
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(src)
+    return out
 
 
 def link(store="", store_name="", drop_item="", buy_url=""):
@@ -212,4 +230,5 @@ def urllib_quote(s):
 
 
 if __name__ == "__main__":
-    print(f"wrote {build()}")
+    import sys
+    print(f"wrote {build(phone2='--phone2' in sys.argv)}")
