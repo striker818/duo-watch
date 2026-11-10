@@ -128,6 +128,28 @@
     }
     let want = stores.find(r => DUO.store && r.value === DUO.store)
       || stores.find(r => DUO.storeName && text(labelOf(r)).includes(DUO.storeName));
+    // Apple lists stores near where it thinks you are (on cellular the phone often geolocates to Chicago, 2026-11-10).
+    // The alerted store missing from the list means the wrong area: search your ZIP before calling it sold out, and
+    // never fall back to "any other store" from a list that was never searched near your ZIP.
+    if (!want && DUO.zip) {
+      const box = vis("input[type=text], input[type=search], input[type=tel]").find(e => /storeLocator|store.*search|search.*store|zip|postal|location/i.test(e.id + e.name + (e.getAttribute("aria-label") || "") + (e.placeholder || "")));
+      if (!box) {
+        const open = vis("button, a").find(b => /storeLocator|store.*search|change.*location/i.test((b.id || "") + (b.getAttribute("data-autom") || ""))
+          || /^(change|edit|search)\b|show stores near|other stores|change location/i.test(text(b)));
+        if (open && act("storesearch_open", () => open.click(), 3000)) return say("opening the store search to look near " + DUO.zip);
+        window.__duoZipLook = window.__duoZipLook || Date.now();
+        if (Date.now() - window.__duoZipLook < 6000) return say("looking for the store search box (the list isn't near " + DUO.zip + ")");
+      } else if (box.value.replace(/\s/g, "") !== DUO.zip || !window.__duoZipSearched) {
+        if (act("search_zip", () => {
+          window.__duoZipTries = (window.__duoZipTries || 0) + 1; window.__duoZipSearched = true;
+          setValue(box, DUO.zip);
+          const go = vis("button").find(b => /storeLocator|store.*search/i.test(b.id + (b.getAttribute("data-autom") || "")) && /search|apply|find|go/i.test(text(b) + (b.getAttribute("aria-label") || "")));
+          go ? go.click() : box.form ? box.form.requestSubmit() : box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true }));
+        }, 4000)) return say("the store list isn't near you - searching stores near " + DUO.zip);
+        return say("waiting for stores near " + DUO.zip);
+      }
+      if (!window.__duoZipSearched) return say("WAIT the pickup list shows stores far from " + DUO.zip + " - search " + DUO.zip + " and pick " + (DUO.storeName || "your store"));
+    }
     if (!want || want.disabled) {
       // the alerted store sold out (or isn't listed): take any other nearby store that still offers pickup
       const other = stores.find(r => r.checked && !r.disabled) || stores.find(r => !r.disabled);
