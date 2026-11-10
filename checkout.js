@@ -150,6 +150,13 @@
       }
       if (!window.__duoZipSearched) return say("WAIT the pickup list shows stores far from " + DUO.zip + " - search " + DUO.zip + " and pick " + (DUO.storeName || "your store"));
     }
+    // ordering 2: a store with only 1 left shows as unavailable for 2. Go back to the bag, drop to 1, and try again before
+    // giving up on the alerted store
+    if ((!want || want.disabled) && +DUO.qty > 1 && DUO.qtyOne && !DUO.qtyOne.get()) {
+      if (act("qty_down", () => { DUO.qtyOne.set(true).then(() => { location.href = "https://www.apple.com/shop/bag"; }); }, 8000))
+        return say((DUO.storeName || "the store") + " can't do 2 for pickup - going back to the bag to order 1");
+      return say("going back to the bag to order 1...");
+    }
     if (!want || want.disabled) {
       // the alerted store sold out (or isn't listed): take any other nearby store that still offers pickup
       const other = stores.find(r => r.checked && !r.disabled) || stores.find(r => !r.disabled);
@@ -268,15 +275,17 @@
       return act("drop", () => extra[0].click(), 1500) ? say("removed " + text(extra[0]).replace(/^Remove/, "") + " from the bag (not the size in stock)") : say("removing the other size...");
     // leftovers in the bag would go into the same order; let you decide rather than check out with them
     const items = removes.length - extra.length;
-    // a ready-cart line at quantity 2+ would order 2 phones: set it to 1 before checking out
-    const q2 = [...document.querySelectorAll("select")].find(x => /itemQuantity/.test(x.name || x.id) && +x.value > 1);
-    if (q2) {
-      if (act("qty1", () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(q2, "1");
-        q2.dispatchEvent(new Event("input", { bubbles: true })); q2.dispatchEvent(new Event("change", { bubbles: true })); }, 4000))
-        return say("set quantity back to 1");
+    if (items > 1) return say("WAIT the bag has " + items + " items - remove all but the phone, then I'll check out");
+    // quantity: DUO.qty (DUO_QTY in local.env; Apple allows 2 per customer) for the one phone left, or 1 after the pickup
+    // page showed the store can't do that many (DUO.qtyOne, set in fulfillment()). Gives up after 3 tries and checks out
+    // whatever the bag says, so a quantity Apple won't take never blocks the checkout.
+    const wantQty = DUO.qtyOne && DUO.qtyOne.get() ? 1 : Math.max(1, Math.min(2, +DUO.qty || 1));
+    const qsel = [...document.querySelectorAll("select")].find(x => /itemQuantity/.test(x.name || x.id));
+    if (qsel && +qsel.value !== wantQty && [...qsel.options].some(o => +o.value === wantQty) && (window.__duoQtyTries || 0) < 3) {
+      if (act("qty", () => { window.__duoQtyTries = (window.__duoQtyTries || 0) + 1; setValue(qsel, String(wantQty)); }, 4000))
+        return say("set quantity to " + wantQty);
       return say("waiting for the quantity to update...");
     }
-    if (items > 1) return say("WAIT the bag has " + items + " items - remove all but the phone, then I'll check out");
     // with Apple Card Monthly the button is bag-checkout-button, and the first click opens an Apple Card pop-up that
     // has its own copy of it; click the pop-up's one when it's open, or we just keep reopening the pop-up
     const sel = "button[data-autom=checkout], button[data-autom=bag-checkout-button]";

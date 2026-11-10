@@ -62,6 +62,7 @@ TEMPLATE = """// ==UserScript==
   var DUO = Object.assign({}, BASE, cfg);
   const save = () => GM.setValue("duo", JSON.stringify(cfg));
   DUO.rescues = { get: () => cfg.rescues || 0, set: n => { cfg.rescues = n; return save(); } };   // survives page loads
+  DUO.qtyOne = { get: () => !!cfg.qtyOne, set: v => { cfg.qtyOne = v; return save(); } };   // store couldn't do 2: order 1
   // Is the Mac already past the bag? checkout.py posts "mac checkout" / "mac stopped" to its private log.
   const macPoll = () => GM.xmlHttpRequest({
     method: "GET", url: "https://ntfy.sh/" + MAC_TOPIC + "/json?poll=1&since=" + Math.floor((cfg.t - 120000) / 1000),
@@ -216,7 +217,7 @@ OUT2 = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs/Userscripts-p
 
 def build(phone2=False):
     pre, cart = ("DUO2_", w.P2_READY_CART) if phone2 else ("DUO_", w.READY_CART)
-    base = {"device": "phone", "zip": w.ZIP, "phone": os.environ.get(pre + "TMOBILE_NUMBER", ""), "financing": w.FINANCING,
+    base = {"device": "phone", "zip": w.ZIP, "phone": os.environ.get(pre + "TMOBILE_NUMBER", ""), "financing": w.FINANCING, "qty": int(os.environ.get(pre + "QTY", "1") or 1),
             "pickup": {k: os.environ.get(pre + "PICKUP_" + k.upper(), "") for k in ("first", "last", "email", "phone")},
             # sizes to keep in the bag between drops, as the bag names them, and their buy pages
             "readyCart": [{"name": "iPhone Duo " + w.PARTS[p][0].replace(" Unlocked", ""), "url": w.PARTS[p][1],
