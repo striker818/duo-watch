@@ -1,37 +1,38 @@
 # When iPhone Duos drop
 
-All times Central. Updated Sat Nov 14, 9:55 AM. Each tracker checks once a minute, so times are within about a minute.
+All times Central. Updated Sat Nov 14, 10:42 AM. Each tracker checks once a minute, so times are within about a minute.
 
 
 ## Get ready around
 
-- 9 AM-10 AM (15), 10 AM-11 AM (6), 12 PM-1 PM (5)
-- 46 drops so far; stock lasted 10 min on average (shortest 1, longest 56)
+- 9 AM-10 AM (16), 10 AM-11 AM (6), 12 PM-1 PM (5)
+- 47 drops so far; stock lasted 11 min on average (shortest 1, longest 63)
 
 ## By hour
 
--  7 AM  ███ 2
--  8 AM  ███ 2
--  9 AM  ████████████████████ 15
+-  7 AM  ██ 2
+-  8 AM  ██ 2
+-  9 AM  ████████████████████ 16
 - 10 AM  ████████ 6
-- 11 AM  ███ 2
-- 12 PM  ███████ 5
--  1 PM  ███ 2
+- 11 AM  ██ 2
+- 12 PM  ██████ 5
+-  1 PM  ██ 2
 -  2 PM  █ 1
 -  3 PM  █████ 4
--  4 PM  ███ 2
--  5 PM  ███ 2
--  8 PM  ███ 2
+-  4 PM  ██ 2
+-  5 PM  ██ 2
+-  8 PM  ██ 2
 - 11 PM  █ 1
 
 ## By day
 
-- Mon 0  Tue 7  Wed 15  Thu 13  Fri 9  Sat 2  Sun 0
+- Mon 0  Tue 7  Wed 15  Thu 13  Fri 9  Sat 3  Sun 0
 
 ## Every drop (newest first)
 
 | When | Item | Store | Lasted |
 |---|---|---|---|
+| Sat Nov 14, 9:39 AM | 512GB Night Sky Unlocked | Mall of America | 63 min |
 | Sat Nov 14, 9:33 AM | 512GB Night Sky Unlocked | Southdale | 12 min |
 | Sat Nov 14, 9:33 AM | 512GB Star White Unlocked | Southdale | 22 min |
 | Fri Nov 13, 4:18 PM | 512GB Night Sky Unlocked | Rosedale Center | 2 min |
