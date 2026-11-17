@@ -1,19 +1,19 @@
 # When iPhone Duos drop
 
-All times Central. Updated Tue Nov 17, 10:07 AM. Each tracker checks once a minute, so times are within about a minute.
+All times Central. Updated Tue Nov 17, 10:10 AM. Each tracker checks once a minute, so times are within about a minute.
 
 
 ## Get ready around
 
-- 9 AM-10 AM (18), 10 AM-11 AM (7), 12 PM-1 PM (5)
-- 52 drops so far; stock lasted 12 min on average (shortest 1, longest 63)
+- 9 AM-10 AM (18), 10 AM-11 AM (8), 12 PM-1 PM (5)
+- 53 drops so far; stock lasted 11 min on average (shortest 1, longest 63)
 
 ## By hour
 
 -  7 AM  ██ 2
 -  8 AM  ██ 2
 -  9 AM  ████████████████████ 18
-- 10 AM  ████████ 7
+- 10 AM  █████████ 8
 - 11 AM  ███ 3
 - 12 PM  ██████ 5
 -  1 PM  ██ 2
@@ -26,12 +26,13 @@ All times Central. Updated Tue Nov 17, 10:07 AM. Each tracker checks once a minu
 
 ## By day
 
-- Mon 0  Tue 9  Wed 15  Thu 13  Fri 9  Sat 6  Sun 0
+- Mon 0  Tue 10  Wed 15  Thu 13  Fri 9  Sat 6  Sun 0
 
 ## Every drop (newest first)
 
 | When | Item | Store | Lasted |
 |---|---|---|---|
+| Tue Nov 17, 10:08 AM | 256GB Star White Unlocked | Mall of America | 2 min |
 | Tue Nov 17, 9:35 AM | 256GB Star White Unlocked | Mall of America | 32 min |
 | Tue Nov 17, 9:32 AM | 256GB Star White Unlocked | Southdale | 28 min |
 | Sat Nov 14, 3:34 PM | 512GB Night Sky Unlocked | Rosedale Center | 3 min |
