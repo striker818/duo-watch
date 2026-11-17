@@ -1,6 +1,6 @@
 # When iPhone Duos drop
 
-All times Central. Updated Tue Nov 17, 11:19 AM. Each tracker checks once a minute, so times are within about a minute.
+All times Central. Updated Tue Nov 17, 11:25 AM. Each tracker checks once a minute, so times are within about a minute.
 
 
 ## Get ready around
